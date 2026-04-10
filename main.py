@@ -14,7 +14,7 @@ import logging
 import matplotlib.pyplot as plt
 from webcam import WebcamStream
 from detector import FaceDetector
-from processor import SignalProcessor # New import
+from processor import SignalProcessor
 
 def main():
     detector = FaceDetector()
@@ -48,8 +48,19 @@ def main():
                 rx, ry, rw, rh = roi_box
                 cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), (0, 255, 0), 2)
 
+                # Estimate the heart rate and display it on the frame
+                bpm = processor.estimate_heart_rate()
+                if bpm is not None:
+                    # If the buffer is full enough to estimate BPM, display it in red
+                    text = f"BPM: {bpm:.1f}"
+                    cv2.putText(frame, text, (rx, ry - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                else:
+                    # The buffer is not full enough to estimate BPM, display a warning in yellow
+                    cv2.putText(frame, "Calcul BPM...", (rx, ry - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
                 # Update the live plot dynamically
                 signal_data, _ = processor.get_signal_data()
+                
                 if len(signal_data) > 10: # Wait for a few frames before plotting
                     line.set_xdata(range(len(signal_data)))
                     line.set_ydata(signal_data)
