@@ -20,13 +20,29 @@ def main():
     detector = FaceDetector()
     processor = SignalProcessor(buffer_seconds=10, target_fps=30)
 
-    # Set up matplotlib for live plotting
-    plt.ion() # Interactive mode on
-    fig, ax = plt.subplots()
-    line, = ax.plot([], [], 'g-')
-    ax.set_title("Raw rPPG Signal (Green Channel Average)")
-    ax.set_xlabel("Frames")
-    ax.set_ylabel("Amplitude")
+    # ==========================================
+    # 3-PANEL MATPLOTLIB DASHBOARD
+    # ==========================================
+    plt.ion()
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 10))
+    fig.tight_layout(pad=4.0) # Adds spacing between graphs
+
+    # 1. Raw Signal
+    line1, = ax1.plot([], [], 'g-')
+    ax1.set_title("1. Raw Signal (Time Domain)")
+    ax1.set_ylabel("Amplitude")
+
+    # 2. Filtered Signal
+    line2, = ax2.plot([], [], 'b-')
+    ax2.set_title("2. Filtered Signal (Bandpass 0.7 - 3.0 Hz)")
+    ax2.set_ylabel("Amplitude")
+
+    # 3. Frequency Spectrum (Welch)
+    line3, = ax3.plot([], [], 'r-')
+    ax3.set_title("3. Welch's PSD (Frequency Domain)")
+    ax3.set_xlabel("Frequency (Hz)")
+    ax3.set_ylabel("Power")
+    # ==========================================
 
     with WebcamStream(camera_index=0) as cam:
         logging.info("Starting rPPG processing loop...")
@@ -48,26 +64,40 @@ def main():
                 rx, ry, rw, rh = roi_box
                 cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), (0, 255, 0), 2)
 
-                # Estimate the heart rate and display it on the frame
-                bpm = processor.estimate_heart_rate()
+                # Get the tuple from the estimate_heart_rate method
+                bpm, freqs, psd = processor.estimate_heart_rate()
+
                 if bpm is not None:
-                    # If the buffer is full enough to estimate BPM, display it in red
                     text = f"BPM: {bpm:.1f}"
                     cv2.putText(frame, text, (rx, ry - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                    
+                    # Update Plot 3: Frequency Spectrum
+                    line3.set_xdata(freqs)
+                    line3.set_ydata(psd)
+                    ax3.relim()
+                    ax3.autoscale_view()
                 else:
-                    # The buffer is not full enough to estimate BPM, display a warning in yellow
                     cv2.putText(frame, "Calcul BPM...", (rx, ry - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-                # Update the live plot dynamically
+                # Update Plots 1 & 2 every frame
                 signal_data, _ = processor.get_signal_data()
-                
-                if len(signal_data) > 10: # Wait for a few frames before plotting
-                    line.set_xdata(range(len(signal_data)))
-                    line.set_ydata(signal_data)
-                    ax.relim()
-                    ax.autoscale_view()
-                    fig.canvas.draw()
-                    fig.canvas.flush_events()
+                filtered_data = processor.get_filtered_signal()
+
+                if len(signal_data) > 10:
+                    line1.set_xdata(range(len(signal_data)))
+                    line1.set_ydata(signal_data)
+                    ax1.relim()
+                    ax1.autoscale_view()
+
+                if filtered_data is not None:
+                    line2.set_xdata(range(len(filtered_data)))
+                    line2.set_ydata(filtered_data)
+                    ax2.relim()
+                    ax2.autoscale_view()
+
+                # Draw the updated graphs
+                fig.canvas.draw()
+                fig.canvas.flush_events()
 
             cv2.imshow("rPPG - Live Feed", frame)
 

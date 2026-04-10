@@ -32,6 +32,28 @@ class WebcamStream:
             raise RuntimeError(f"Critical Error: Could not open camera at index {self.camera_index}. Check connections.")
         logging.info(f"Camera initialized successfully at index {self.camera_index}.")
 
+        # ==========================================
+        # HARDWARE OPTIMIZATION FOR rPPG
+        # ==========================================
+        logging.info("Attempting to lock camera hardware parameters...")
+
+        # 1. Disable Auto-Exposure (1 = off for Linux)
+        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) 
+        
+        # 2. Set a fixed, manual exposure time. 
+        self.cap.set(cv2.CAP_PROP_EXPOSURE, -5)
+
+        # 3. Disable Auto-White Balance (0 = off)
+        self.cap.set(cv2.CAP_PROP_AUTO_WB, 0)
+
+        # 4. Force a strict framerate to keep the math in scipy accurate
+        self.cap.set(cv2.CAP_PROP_FPS, 30)
+        
+        # Read back the actual FPS to confirm the hardware accepted it
+        actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
+        logging.info(f"Camera initialized. Operating at {actual_fps} FPS.")
+        # ==========================================
+
     def read_frame(self) -> Tuple[bool, Optional[np.ndarray]]:
         """
         Reads a single frame from the webcam.

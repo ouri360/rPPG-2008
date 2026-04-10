@@ -17,10 +17,12 @@ from scipy.signal import butter, filtfilt, welch
 
 # Minimum number of seconds required to perform filtering and FFT analysis
 MINIMUM_AMOUNT_OF_DATA = 3 
+BUFFER_AVERAGE = 15     # Number of BPM estimates to average for smoothing
 # Filter parameters for bandpass filter (these can be tuned based on expected heart rate range)
 LOWCUT_HZ = 0.7         # Corresponds to ~42 BPM
 HIGHCUT_HZ = 3.0        # Corresponds to ~180 BPM
 ORDER = 2               # Filter order (2nd order Butterworth is a common choice for rPPG)
+NFFT = 2048             # Number of points for FFT (zero-padding for better frequency resolution)
 
 class SignalProcessor:
     """
@@ -42,6 +44,9 @@ class SignalProcessor:
         # deques automatically pop the oldest item when maxlen is reached
         self.raw_signal = deque(maxlen=self.max_length)
         self.timestamps = deque(maxlen=self.max_length)
+
+        # Buffer for smoothing BPM estimates over time (average over the last 15 estimates)
+        self.bpm_buffer = deque(maxlen=BUFFER_AVERAGE) 
         
         logging.info(f"SignalProcessor initialized with a {buffer_seconds}-second buffer.")
 
@@ -104,28 +109,46 @@ class SignalProcessor:
         filtered_signal = filtfilt(b, a, signal)
         
         return filtered_signal
-
-    def estimate_heart_rate(self) -> Optional[float]:
+    
+    def estimate_heart_rate(self) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
         """
-        Calculates the Power Spectral Density (PSD) using Welch's method 
-        to find the dominant heart rate frequency.
+        Calculates the PSD and returns the BPM along with the frequency data for plotting.
+        Returns: (smoothed_bpm, frequencies_array, psd_array)
         """
         filtered_signal = self.get_filtered_signal()
         
         if filtered_signal is None:
-            return None
+            return None, None, None
             
+        # Zero-padding with nfft for better frequency resolution in the FFT.
+        n_fft = NFFT
+        
         # Welch's method computes the PSD
         # nperseg is the length of each segment. Using the full length gives max frequency resolution.
-        frequencies, psd = welch(filtered_signal, fs=self.target_fps, nperseg=len(filtered_signal))
+        frequencies, psd = welch(
+            filtered_signal, 
+            fs=self.target_fps, 
+            nperseg=len(filtered_signal), 
+            nfft=n_fft
+        )
+
+        # We create a mask to focus only on the frequencies that correspond to plausible heart rates (0.7 Hz to 3.0 Hz)
+        valid_indices = np.where((frequencies >= LOWCUT_HZ) & (frequencies <= HIGHCUT_HZ))[0]
+        
+        valid_frequencies = frequencies[valid_indices]
+        valid_psd = psd[valid_indices]
         
         # Find the index of the highest power peak
-        peak_index = np.argmax(psd)
-        
+        peak_index = np.argmax(valid_psd)
         # Get the corresponding frequency in Hz
-        dominant_freq = frequencies[peak_index]
+        dominant_freq = valid_frequencies[peak_index]
         
         # Convert Hz to Beats Per Minute (BPM)
-        bpm = dominant_freq * 60.0
+        raw_bpm = dominant_freq * 60.0
         
-        return bpm
+        # Simple moving average to smooth the BPM estimates over time
+        self.bpm_buffer.append(raw_bpm)
+        smoothed_bpm = sum(self.bpm_buffer) / len(self.bpm_buffer)
+        
+        # We return the frequency and PSD arrays alongside the BPM
+        return smoothed_bpm, valid_frequencies, valid_psd
