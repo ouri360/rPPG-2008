@@ -1,4 +1,13 @@
-"""Main application for rPPG signal extraction."""
+"""
+Main application for rPPG signal extraction.
+---------------------------------------
+This script integrates the webcam streaming, face detection, 
+and signal processing modules to capture video frames, 
+detect the face, extract the rPPG signal, and display it in real-time. 
+It also includes a live plot of the raw signal values for visualization.
+
+Press 'q' to quit the application safely.
+"""
 
 import cv2
 import logging
