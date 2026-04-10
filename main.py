@@ -2,13 +2,23 @@
 
 import cv2
 import logging
+import matplotlib.pyplot as plt
 from webcam import WebcamStream
 from detector import FaceDetector
+from processor import SignalProcessor # New import
 
 def main():
     detector = FaceDetector()
+    processor = SignalProcessor(buffer_seconds=10, target_fps=30)
 
-    # Context manager safely handles camera hardware
+    # Set up matplotlib for live plotting
+    plt.ion() # Interactive mode on
+    fig, ax = plt.subplots()
+    line, = ax.plot([], [], 'g-')
+    ax.set_title("Raw rPPG Signal (Green Channel Average)")
+    ax.set_xlabel("Frames")
+    ax.set_ylabel("Amplitude")
+
     with WebcamStream(camera_index=0) as cam:
         logging.info("Starting rPPG processing loop...")
         
@@ -17,24 +27,36 @@ def main():
             if not success:
                 break
 
-            # 1. Detect the face
             face_box = detector.detect_largest_face(frame)
 
             if face_box:
-                # 2. Extract the Region of Interest for rPPG
                 roi_box = detector.get_rppg_roi(face_box)
                 
-                rx, ry, rw, rh = roi_box
+                # Extract the signal!
+                current_value = processor.extract_and_buffer(frame, roi_box)  # noqa: F841
                 
-                # Draw a green rectangle to visualize the ROI
+                # Draw the bounding box
+                rx, ry, rw, rh = roi_box
                 cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), (0, 255, 0), 2)
 
-            # Display the result
-            cv2.imshow("rPPG - ROI Extraction", frame)
+                # Update the live plot dynamically
+                signal_data, _ = processor.get_signal_data()
+                if len(signal_data) > 10: # Wait for a few frames before plotting
+                    line.set_xdata(range(len(signal_data)))
+                    line.set_ydata(signal_data)
+                    ax.relim()
+                    ax.autoscale_view()
+                    fig.canvas.draw()
+                    fig.canvas.flush_events()
+
+            cv2.imshow("rPPG - Live Feed", frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 logging.info("User requested shutdown.")
                 break
+                
+    plt.ioff()
+    plt.show()
 
 if __name__ == "__main__":
     main()
