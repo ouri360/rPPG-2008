@@ -47,35 +47,35 @@ rPPG-2008/
 
 The project relies on the following standard and third-party libraries:
 
-    **Core:** `cv2` (OpenCV), `numpy`, `scipy`, `matplotlib.pyplot`
+    Core: cv2 (OpenCV), numpy, scipy, matplotlib.pyplot
 
-    **Standard Python:** `logging`, `time`, `collections` (`deque`), `typing` (`Tuple`, `Optional`, `List`)
+    Standard Python: logging, time, collections (deque), typing (Tuple, Optional, List)
 
 **Option A: Standard PC / Laptop (Prototyping)**
 
 For Windows/macOS/Linux x86 machines:
-
-git `clone` [https://github.com/ouri360/rPPG-2008.git](https://github.com/ouri360/rPPG-2008.git)
-`cd` rPPG-2008
+```text
+git clone [https://github.com/ouri360/rPPG-2008.git](https://github.com/ouri360/rPPG-2008.git)
+cd rPPG-2008
 pip install opencv-python numpy scipy matplotlib
-
+```
 **Option B: Nvidia Jetson Nano (Edge Deployment)**
 
 ⚠️ **IMPORTANT**: Do not use pip install opencv-python on the Jetson Nano, as it will overwrite Nvidia's hardware-accelerated JetPack binaries. Use the apt package manager for heavy math libraries on ARM64 architectures.
-
-git `clone` [https://github.com/ouri360/rPPG-2008.git](https://github.com/ouri360/rPPG-2008.git)
-`cd` rPPG-2008
+```text
+git clone [https://github.com/ouri360/rPPG-2008.git](https://github.com/ouri360/rPPG-2008.git)
+cd rPPG-2008
 sudo apt-get update
 sudo apt-get install python3-scipy python3-numpy python3-matplotlib
-
+```
 ---
 
 ## 💻 Usage
 
 Run the main pipeline:
-
+```text
 python main.py
-
+```
 **The `DEBUG_MODE` Flag**
 
 At the top of main.py, you will find a DEBUG_MODE boolean used to manage CPU resources depending on your hardware:
