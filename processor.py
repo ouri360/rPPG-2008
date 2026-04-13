@@ -81,6 +81,36 @@ class SignalProcessor:
 
         return spatial_average
 
+    def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict) -> float:
+        """
+        Calculates a weighted spatial average from multiple ROIs.
+        """
+        # Define the weights (must sum to 1.0)
+        weights = {
+            'forehead': 0.60,
+            'left_cheek': 0.20,
+            'right_cheek': 0.20
+        }
+        
+        weighted_sum = 0.0
+        
+        for region_name, box in rois.items():
+            x, y, w, h = box
+            
+            # Extract ROI and isolate Green channel
+            cropped_roi = frame[y:y+h, x:x+w]
+            green_channel = cropped_roi[:, :, 1]
+            
+            # Calculate mean and apply the specific weight for this region
+            region_mean = float(np.mean(green_channel))
+            weighted_sum += region_mean * weights[region_name]
+
+        # Buffer the final weighted value
+        self.raw_signal.append(weighted_sum)
+        self.timestamps.append(time.time())
+
+        return weighted_sum
+
     def get_signal_data(self) -> Tuple[np.ndarray, np.ndarray]:
         """
         Retrieves the current buffers as NumPy arrays for filtering/FFT.

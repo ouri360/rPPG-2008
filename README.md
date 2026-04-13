@@ -17,7 +17,7 @@ While based on the 2008 paper, this implementation introduces several modern DSP
 
 1. **Hardware Locking:** Disables webcam Auto-Exposure and Auto-White Balance to prevent artificial signal spikes.
 2. **Facial Tracking (Viola-Jones):** Uses OpenCV Haar Cascades with **Exponential Moving Average (EMA) smoothing** on the bounding box to eliminate high-frequency spatial jitter.
-3. **Signal Extraction:** Isolates the Region of Interest (ROI) and calculates the spatial average of the **Green Channel** (where hemoglobin absorption is highest) into a rolling time-series buffer.
+3. **Signal Extraction:** Isolates the Regions of Interest (ROIs) : Forehead, left cheek and right cheek, and calculates the spatial average of the **Green Channel** (where hemoglobin absorption is highest) into a rolling time-series buffer. The forehead value is weighted higher than the cheeks value since it is the most precise region for rPPG methods. 
 4. **Pre-Processing (Detrending):** Applies linear detrending to eliminate baseline wander caused by slow postural movements or ambient light shifts, preventing IIR filter ringing.
 5. **The `scipy.signal` Toolkit (Filtering & Frequency Analysis):**
    - **`butter()`**: Designs an infinite impulse response (IIR) Butterworth filter (Bandpass 0.7 Hz - 3.0 Hz). Returns the numerator and denominator coefficients of the filter's transfer function.

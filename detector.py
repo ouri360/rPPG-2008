@@ -4,7 +4,9 @@ FaceDetector Module for rPPG Signal Extraction
 This module implements a lightweight face detection algorithm using Haar Cascades, 
 optimized for real-time applications in remote photoplethysmography (rPPG). 
 It detects the largest face in the frame and isolates a central region of interest (ROI) to minimize noise from hair, 
-background, and neck movement.
+background, and neck movement. The module also includes temporal smoothing of the bounding box to reduce jitter 
+and improve signal stability. It can also isolate specific sub-regions of the face (forehead, left cheek, right cheek) 
+for more targeted signal extraction.
 """
 
 import cv2
@@ -27,7 +29,7 @@ class FaceDetector:
         self.face_cascade = cv2.CascadeClassifier(cascade_path)
 
         # Store the previous bounding box for smoothing
-        self.prev_roi = None 
+        self.prev_roi, self.prev_rois = None, None
         self.alpha = SMOOTHING_FACTOR
         
         if self.face_cascade.empty():
@@ -100,3 +102,57 @@ class FaceDetector:
             return smoothed_roi
         
         return current_roi
+    
+    def get_multi_rois(self, face_box: Tuple[int, int, int, int]) -> dict:
+        """
+        Slices the main face bounding box into three specific regions: 
+        Forehead, Left Cheek, and Right Cheek.
+        Applies a temporal smoothing to prevent ROI jitter.
+        """
+        x, y, w, h = face_box
+        
+        # 1. Forehead: Top center, avoiding the hairline and eyebrows
+        fh_x = int(x + (w * 0.25))
+        fh_y = int(y + (h * 0.05))
+        fh_w = int(w * 0.50)
+        fh_h = int(h * 0.20)
+        
+        # 2. Left Cheek: Mid-left, avoiding the nose and eye
+        lc_x = int(x + (w * 0.20))
+        lc_y = int(y + (h * 0.50))
+        lc_w = int(w * 0.15)
+        lc_h = int(h * 0.20)
+        
+        # 3. Right Cheek: Mid-right, avoiding the nose and eye
+        rc_x = int(x + (w * 0.65))
+        rc_y = int(y + (h * 0.50))
+        rc_w = int(w * 0.15)
+        rc_h = int(h * 0.20)
+        
+        current_rois = {
+            'forehead': (fh_x, fh_y, fh_w, fh_h),
+            'left_cheek': (lc_x, lc_y, lc_w, lc_h),
+            'right_cheek': (rc_x, rc_y, rc_w, rc_h)
+        }
+
+        # Apply Exponential Moving Average (EMA) to all regions
+        if self.prev_rois is None:
+            self.prev_rois = current_rois
+            return current_rois
+        else:
+            smoothed_rois = {}
+            for name in current_rois:
+                # Extract the current and previous tuples for this specific ROI
+                curr = current_rois[name]
+                prev = self.prev_rois[name]
+                
+                # Apply smoothing to x, y, w, h simultaneously
+                smoothed_tuple = tuple(
+                    int(self.alpha * c + (1 - self.alpha) * p) 
+                    for c, p in zip(curr, prev)
+                )
+                smoothed_rois[name] = smoothed_tuple
+                
+            # Update state for the next frame
+            self.prev_rois = smoothed_rois
+            return smoothed_rois

@@ -59,21 +59,28 @@ def main():
             face_box = detector.detect_largest_face(frame)
 
             if face_box:
-                roi_box = detector.get_rppg_roi(face_box)
+                # Get the 3 regions of interests (ROIs)
+                multi_rois = detector.get_multi_rois(face_box)
                 
-                # Extract the signal
-                current_value = processor.extract_and_buffer(frame, roi_box)  # noqa: F841
+                # Extract using the weighted method
+                processor.extract_and_buffer_multi(frame, multi_rois)
                 
-                # Draw the bounding box
-                rx, ry, rw, rh = roi_box
-                cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), (0, 255, 0), 2)
+                # Draw the bounding boxes for visualization
+                for name, box in multi_rois.items():
+                    rx, ry, rw, rh = box
+                    # Draw Forehead in Green, Cheeks in Blue to distinguish
+                    color = (0, 255, 0) if name == 'forehead' else (255, 0, 0)
+                    cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), color, 2)
+
+                # Extract specifically the forehead coordinates
+                fx, fy, fw, fh = multi_rois['forehead']
 
                 # Get the tuple from the estimate_heart_rate method
                 bpm, freqs, psd = processor.estimate_heart_rate()
 
                 if bpm is not None:
                     text = f"BPM: {bpm:.1f}"
-                    cv2.putText(frame, text, (rx, ry - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                    cv2.putText(frame, text, (fx, fy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
                     
                     if DEBUG_MODE:
                         # Update Plot 3: Frequency Spectrum
@@ -82,7 +89,7 @@ def main():
                         ax3.relim()
                         ax3.autoscale_view()
                 else:
-                    cv2.putText(frame, "Calcul BPM...", (rx, ry - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                    cv2.putText(frame, "Calcul BPM...", (fx, fy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
                 if DEBUG_MODE:
                     # Update Plots 1 & 2 every frame
