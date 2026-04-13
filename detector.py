@@ -51,9 +51,9 @@ class FaceDetector:
         # detectMultiScale parameters (scaleFactor, minNeighbors) can be tuned depending of the lightning
         faces = self.face_cascade.detectMultiScale(
             gray_frame, 
-            scaleFactor=1.1, 
-            minNeighbors=5, 
-            minSize=(100, 100) # Ignore tiny background artifacts
+            scaleFactor=1.1,    # How much the image size is reduced at each image scale. Higher values = faster but less accurate
+            minNeighbors=5,     # Must scane multiple times to confirm a face, reduces false positives
+            minSize=(100, 100)  # Ignore tiny background artifacts
         )
 
         if len(faces) == 0:
