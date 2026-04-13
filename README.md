@@ -7,7 +7,7 @@
 
 An optimized, real-time implementation of the foundational remote photoplethysmography (rPPG) method proposed by [Verkruysse et al. (2008)](https://pmc.ncbi.nlm.nih.gov/articles/PMC2717852/). 
 
-This project extracts a human heart rate (BPM) from a standard webcam feed using computer vision and digital signal processing. It is specifically architected for **Smart IoT and Edge AI environments** (e.g., Nvidia Jetson Nano), featuring robust noise reduction, memory-efficient rolling buffers, and a decoupled object-oriented design.
+This project extracts a human heart rate (BPM) from a standard webcam feed using computer vision and digital signal processing. It is specifically architected for **Edge AI environments** (e.g., Nvidia Jetson Nano), featuring robust noise reduction, memory-efficient rolling buffers, and a decoupled object-oriented design.
 
 ---
 
