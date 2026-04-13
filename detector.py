@@ -31,6 +31,9 @@ class FaceDetector:
         # Store the previous bounding box for smoothing
         self.prev_roi, self.prev_rois = None, None
         self.alpha = SMOOTHING_FACTOR
+
+        #Cache to remember the last valid face position
+        self.last_face_box = None
         
         if self.face_cascade.empty():
             raise RuntimeError("Critical Error: Failed to load Haar Cascade XML file.")
@@ -58,15 +61,35 @@ class FaceDetector:
             minSize=(100, 100)  # Ignore tiny background artifacts
         )
 
+        # 1. CACHING: If no face is found (cascade glitch), fallback to the last known position
         if len(faces) == 0:
+            if self.last_face_box is not None:
+                return self.last_face_box
             return None
 
-        # If multiple faces are found, assume the largest one is our subject
-        if len(faces) > 1:
-            largest_face = max(faces, key=lambda rect: rect[2] * rect[3])
-            return tuple(largest_face)
+        # Find the largest face detected in the current frame
+        largest_face = tuple(max(faces, key=lambda rect: rect[2] * rect[3]))
 
-        return tuple(faces[0])
+        # 2. SPATIAL GATING: Prevent impossible sudden jumps (False Positives)
+        if self.last_face_box is not None:
+            x1, y1, w1, h1 = largest_face
+            x2, y2, w2, h2 = self.last_face_box
+
+            # Calculate the center (X, Y) of both boxes
+            center_new = (x1 + w1 // 2, y1 + h1 // 2)
+            center_old = (x2 + w2 // 2, y2 + h2 // 2)
+
+            # Calculate Euclidean distance between the two centers
+            distance = np.sqrt((center_new[0] - center_old[0])**2 + (center_new[1] - center_old[1])**2)
+
+            # If the face jumped by more than 50% of its own width in a single frame, it's an artifact
+            if distance > (w2 * 0.5):
+                # Ignore the glitch, return the locked old face
+                return self.last_face_box
+
+        # If it passed the checks, update the cache with the new face
+        self.last_face_box = largest_face
+        return largest_face
 
     def get_rppg_roi(self, face_box: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
         """

@@ -14,13 +14,14 @@ import logging
 from collections import deque
 from typing import Tuple, Optional
 from scipy.signal import butter, filtfilt, welch, detrend
+from scipy.fft import fft
 
 # Minimum number of seconds required to perform filtering and FFT analysis
 MINIMUM_AMOUNT_OF_DATA = 3 
 BUFFER_AVERAGE = 15     # Number of BPM estimates to average for smoothing
 # Filter parameters for bandpass filter (these can be tuned based on expected heart rate range)
 LOWCUT_HZ = 0.7         # Corresponds to ~42 BPM
-HIGHCUT_HZ = 3.0        # Corresponds to ~180 BPM
+HIGHCUT_HZ = 2.5        # Corresponds to ~150 BPM
 ORDER = 2               # Filter order (2nd order Butterworth is a common choice for rPPG)
 NFFT = 2048             # Number of points for FFT (zero-padding for better frequency resolution)
 
@@ -39,7 +40,7 @@ class SignalProcessor:
         """
         self.target_fps = target_fps
         # Calculate maximum buffer size
-        self.max_length = buffer_seconds * target_fps
+        self.max_length = int(buffer_seconds * target_fps)
         
         # deques automatically pop the oldest item when maxlen is reached
         self.raw_signal = deque(maxlen=self.max_length)
@@ -145,43 +146,47 @@ class SignalProcessor:
     
     def estimate_heart_rate(self) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
         """
-        Calculates the PSD and returns the BPM along with the frequency data for plotting.
-        Returns: (smoothed_bpm, frequencies_array, psd_array)
+        Calculates the Standard FFT and returns the BPM along with frequency data for plotting.
+        Returns: (smoothed_bpm, frequencies_array, magnitude_array)
         """
         filtered_signal = self.get_filtered_signal()
         
         if filtered_signal is None:
             return None, None, None
             
-        # Zero-padding with nfft for better frequency resolution in the FFT.
-        n_fft = NFFT
+        n_fft = NFFT # Zero-padding to maintain decimal precision for BPM
         
-        # Welch's method computes the PSD
-        # nperseg is the length of each segment. Using the full length gives max frequency resolution.
-        frequencies, psd = welch(
-            filtered_signal, 
-            fs=self.target_fps, 
-            nperseg=len(filtered_signal), 
-            nfft=n_fft
-        )
-
-        # We create a mask to focus only on the frequencies that correspond to plausible heart rates (0.7 Hz to 3.0 Hz)
+        # ==========================================
+        # DSP UPGRADE: Apply a Hanning Window to stop Spectral Leakage
+        # ==========================================
+        window = np.hanning(len(filtered_signal))
+        windowed_signal = filtered_signal * window
+        
+        # 1. Compute the Standard 1D Discrete Fourier Transform
+        fft_complex = np.fft.rfft(windowed_signal, n=n_fft)
+        # ==========================================
+        
+        # 2. Extract the magnitude (absolute value) from the complex numbers
+        fft_magnitude = np.abs(fft_complex)
+        
+        # 3. Generate the corresponding frequency bins
+        # d is the sample spacing (inverse of framerate)
+        frequencies = np.fft.rfftfreq(n_fft, d=1.0/self.target_fps)
+        
+        # 4. Mask the arrays to strictly look at human heart rates (0.7 to 3.0 Hz)
         valid_indices = np.where((frequencies >= LOWCUT_HZ) & (frequencies <= HIGHCUT_HZ))[0]
         
         valid_frequencies = frequencies[valid_indices]
-        valid_psd = psd[valid_indices]
+        valid_magnitude = fft_magnitude[valid_indices]
         
-        # Find the index of the highest power peak
-        peak_index = np.argmax(valid_psd)
-        # Get the corresponding frequency in Hz
+        # 5. Find the peak frequency
+        peak_index = np.argmax(valid_magnitude)
         dominant_freq = valid_frequencies[peak_index]
         
-        # Convert Hz to Beats Per Minute (BPM)
         raw_bpm = dominant_freq * 60.0
         
-        # Simple moving average to smooth the BPM estimates over time
+        # Apply the rolling average smoothing
         self.bpm_buffer.append(raw_bpm)
         smoothed_bpm = sum(self.bpm_buffer) / len(self.bpm_buffer)
         
-        # We return the frequency and PSD arrays alongside the BPM
-        return smoothed_bpm, valid_frequencies, valid_psd
+        return smoothed_bpm, valid_frequencies, valid_magnitude

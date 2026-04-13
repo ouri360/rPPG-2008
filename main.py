@@ -16,83 +16,86 @@ from webcam import WebcamStream
 from detector import FaceDetector
 from processor import SignalProcessor
 
-# Set to False when deploying, True enables the 3-panel matplotlib dashboard for debugging and visualization
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 def main():
     detector = FaceDetector()
-    processor = SignalProcessor(buffer_seconds=10, target_fps=30)
 
     if DEBUG_MODE:
-        # ==========================================
-        # 3-PANEL MATPLOTLIB DASHBOARD
-        # ==========================================
         plt.ion()
         fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 10))
-        fig.tight_layout(pad=4.0) # Adds spacing between graphs
+        fig.tight_layout(pad=4.0)
 
-        # 1. Raw Signal
         line1, = ax1.plot([], [], 'g-')
-        ax1.set_title("1. Raw Signal (Time Domain)")
+        ax1.set_title("1. Raw Signal (Weighted Multi-ROI)")
         ax1.set_ylabel("Amplitude")
 
-        # 2. Filtered Signal
         line2, = ax2.plot([], [], 'b-')
         ax2.set_title("2. Filtered Signal (Bandpass 0.7 - 3.0 Hz)")
         ax2.set_ylabel("Amplitude")
 
-        # 3. Frequency Spectrum (Welch)
-        line3, = ax3.plot([], [], 'r-')
-        ax3.set_title("3. Welch's PSD (Frequency Domain)")
+        ax3.set_title("3. Standard FFT Magnitude (Frequency Domain)")
         ax3.set_xlabel("Frequency (Hz)")
-        ax3.set_ylabel("Power")
-        # ==========================================
+        ax3.set_ylabel("Magnitude")
 
-    with WebcamStream(camera_index=0) as cam:
-        logging.info("Starting rPPG processing loop...")
+    # ==========================================
+    # VIDEO SOURCE SELECTION
+    # ==========================================
+    #VIDEO_SOURCE = "dataset/subject1.mp4" # Or set to 0 for webcam
+    VIDEO_SOURCE = 0
+
+    fft_bars = None
+
+    with WebcamStream(source=VIDEO_SOURCE) as cam:
+        
+        processor = SignalProcessor(buffer_seconds=10, target_fps=cam.fps)
+        logging.info("Démarrage de la boucle de traitement rPPG Multi-ROI...")
         
         while True:
             success, frame = cam.read_frame()
-            if not success:
+            if not success: 
                 break
 
+            # 1. Detect the main face
             face_box = detector.detect_largest_face(frame)
 
             if face_box:
-                # Get the 3 regions of interests (ROIs)
+                # 2. Extract the dictionary of 3 sub-regions
                 multi_rois = detector.get_multi_rois(face_box)
                 
-                # Extract using the weighted method
+                # 3. Process the weighted average
                 processor.extract_and_buffer_multi(frame, multi_rois)
                 
-                # Draw the bounding boxes for visualization
-                for name, box in multi_rois.items():
+                # 4. Draw the 3 sub-regions on the frame
+                for region_name, box in multi_rois.items():
                     rx, ry, rw, rh = box
-                    # Draw Forehead in Green, Cheeks in Blue to distinguish
-                    color = (0, 255, 0) if name == 'forehead' else (255, 0, 0)
-                    cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), color, 2)
+                    cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), (0, 255, 0), 2)
 
-                # Extract specifically the forehead coordinates
-                fx, fy, fw, fh = multi_rois['forehead']
+                # Anchor the text to the top of the main face box
+                fx, fy, fw, fh = face_box
 
-                # Get the tuple from the estimate_heart_rate method
-                bpm, freqs, psd = processor.estimate_heart_rate()
-
+                bpm, freqs, magnitude = processor.estimate_heart_rate()
+                
                 if bpm is not None:
                     text = f"BPM: {bpm:.1f}"
                     cv2.putText(frame, text, (fx, fy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
                     
                     if DEBUG_MODE:
-                        # Update Plot 3: Frequency Spectrum
-                        line3.set_xdata(freqs)
-                        line3.set_ydata(psd)
+                        # If the bars don't exist yet, create them
+                        if fft_bars is None:
+                            # width determines how thick the bars are. 0.02 looks good for this Hz range.
+                            fft_bars = ax3.bar(freqs, magnitude, width=0.02, color='red', align='center')
+                        else:
+                            # If they exist, strictly update their heights for maximum performance
+                            for bar, new_height in zip(fft_bars, magnitude):
+                                bar.set_height(new_height)
+                        
                         ax3.relim()
                         ax3.autoscale_view()
                 else:
                     cv2.putText(frame, "Calcul BPM...", (fx, fy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
                 if DEBUG_MODE:
-                    # Update Plots 1 & 2 every frame
                     signal_data, _ = processor.get_signal_data()
                     filtered_data = processor.get_filtered_signal()
 
@@ -108,18 +111,19 @@ def main():
                         ax2.relim()
                         ax2.autoscale_view()
 
-                    # Draw the updated graphs
                     fig.canvas.draw()
                     fig.canvas.flush_events()
 
             cv2.imshow("rPPG - Live Feed", frame)
 
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                logging.info("User requested shutdown.")
+            delay = int(1000 / cam.fps) if isinstance(VIDEO_SOURCE, str) else 1
+            if cv2.waitKey(delay) & 0xFF == ord('q'):
+                logging.info("Fermeture demandée par l'utilisateur.")
                 break
                 
-    plt.ioff()
-    plt.show()
+    if DEBUG_MODE:
+        plt.ioff()
+        plt.show()
 
 if __name__ == "__main__":
     main()

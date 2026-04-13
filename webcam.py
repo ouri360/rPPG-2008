@@ -7,7 +7,7 @@ It includes error handling for hardware issues and ensures proper resource manag
 
 import cv2
 import logging
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Union
 import numpy as np
 
 # Configure basic logging (Standard practice over using 'print')
@@ -15,66 +15,50 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class WebcamStream:
     """
-    A robust interface for capturing video frames from a USB webcam.
-
-    Attributes:
-        camera_index (int): The index of the camera device (default is 0 for built-in/primary).
-        cap (cv2.VideoCapture): The OpenCV video capture object.
+    Interface for capturing video frames from a live webcam OR a video file.
     """
-
-    def __init__(self, camera_index: int = 0):
-        """Initializes the webcam stream and verifies hardware availability."""
-        self.camera_index = camera_index
-        self.cap = cv2.VideoCapture(self.camera_index)
+    def __init__(self, source: Union[int, str] = 0):
+        """
+        Initializes the video stream.
+        Args:
+            source: int (e.g., 0) for live webcam, or str (e.g., "video.mp4") for a file.
+        """
+        self.source = source
+        self.cap = cv2.VideoCapture(self.source)
         
-        # Fail if the hardware is unavailable
         if not self.cap.isOpened():
-            raise RuntimeError(f"Critical Error: Could not open camera at index {self.camera_index}. Check connections.")
-        logging.info(f"Camera initialized successfully at index {self.camera_index}.")
-
-        # ==========================================
-        # HARDWARE OPTIMIZATION FOR rPPG
-        # ==========================================
-        logging.info("Attempting to lock camera hardware parameters...")
-
-        # 1. Disable Auto-Exposure (1 = off for Linux)
-        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) 
+            raise RuntimeError(f"Critical Error: Could not open video source: {self.source}.")
         
-        # 2. Set a fixed, manual exposure time. 
-        self.cap.set(cv2.CAP_PROP_EXPOSURE, -5)
+        # Dynamically extract the exact FPS of the video file or camera
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+        # Fallback in case OpenCV fails to read the metadata
+        if self.fps == 0 or np.isnan(self.fps):
+            self.fps = 30.0 
+            logging.warning("Could not read FPS from source. Defaulting to 30.0 FPS.")
 
-        # 3. Disable Auto-White Balance (0 = off)
-        self.cap.set(cv2.CAP_PROP_AUTO_WB, 0)
+        logging.info(f"Video source initialized successfully. Operating at {self.fps} FPS.")
 
-        # 4. Force a strict framerate to keep the math in scipy accurate
-        self.cap.set(cv2.CAP_PROP_FPS, 30)
-        
-        # Read back the actual FPS to confirm the hardware accepted it
-        actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
-        logging.info(f"Camera initialized. Operating at {actual_fps} FPS.")
-        # ==========================================
+        # Only apply hardware locking (Exposure/WB) if the source is a live physical camera (integer)
+        if isinstance(self.source, int):
+            logging.info("Live camera detected. Attempting to lock hardware parameters...")
+            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25) 
+            self.cap.set(cv2.CAP_PROP_EXPOSURE, -5)
+            self.cap.set(cv2.CAP_PROP_AUTO_WB, 0)
+            self.cap.set(cv2.CAP_PROP_FPS, 30)
 
     def read_frame(self) -> Tuple[bool, Optional[np.ndarray]]:
-        """
-        Reads a single frame from the webcam.
-
-        Returns:
-            Tuple[bool, Optional[np.ndarray]]: A boolean indicating success, and the frame array (or None if failed).
-        """
         ret, frame = self.cap.read()
         if not ret:
-            logging.warning("Hardware Warning: Failed to grab frame from camera.")
+            # If playing a video file, ret=False means the video is finished.
+            logging.info("End of video stream reached or hardware failed.")
             return False, None
         return True, frame
 
     def release(self) -> None:
-        """Safely releases the camera hardware."""
         if self.cap.isOpened():
             self.cap.release()
-            logging.info("Camera hardware released safely.")
+            logging.info("Video source released safely.")
 
-    # Context Manager Magic Methods (__enter__ and __exit__)
-    # These allow the use of: "with WebcamStream() as stream:"
     def __enter__(self):
         return self
 
