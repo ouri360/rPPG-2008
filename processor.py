@@ -13,7 +13,7 @@ import time
 import logging
 from collections import deque
 from typing import Tuple, Optional
-from scipy.signal import butter, filtfilt, welch
+from scipy.signal import butter, filtfilt, welch, detrend
 
 # Minimum number of seconds required to perform filtering and FFT analysis
 MINIMUM_AMOUNT_OF_DATA = 3 
@@ -96,6 +96,9 @@ class SignalProcessor:
             return None
 
         signal = np.array(self.raw_signal)
+
+        # Remove linear baseline drift before filtering (useful for changes in lighting or subject movement)
+        signal = detrend(signal)
         
         # 1. Design the filter (e.g. 0.7 Hz to 3.0 Hz covers ~42 to 180 BPM)
         lowcut = LOWCUT_HZ

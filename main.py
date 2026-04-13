@@ -16,33 +16,37 @@ from webcam import WebcamStream
 from detector import FaceDetector
 from processor import SignalProcessor
 
+# Set to False when deploying, True enables the 3-panel matplotlib dashboard for debugging and visualization
+DEBUG_MODE = False
+
 def main():
     detector = FaceDetector()
     processor = SignalProcessor(buffer_seconds=10, target_fps=30)
 
-    # ==========================================
-    # 3-PANEL MATPLOTLIB DASHBOARD
-    # ==========================================
-    plt.ion()
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 10))
-    fig.tight_layout(pad=4.0) # Adds spacing between graphs
+    if DEBUG_MODE:
+        # ==========================================
+        # 3-PANEL MATPLOTLIB DASHBOARD
+        # ==========================================
+        plt.ion()
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 10))
+        fig.tight_layout(pad=4.0) # Adds spacing between graphs
 
-    # 1. Raw Signal
-    line1, = ax1.plot([], [], 'g-')
-    ax1.set_title("1. Raw Signal (Time Domain)")
-    ax1.set_ylabel("Amplitude")
+        # 1. Raw Signal
+        line1, = ax1.plot([], [], 'g-')
+        ax1.set_title("1. Raw Signal (Time Domain)")
+        ax1.set_ylabel("Amplitude")
 
-    # 2. Filtered Signal
-    line2, = ax2.plot([], [], 'b-')
-    ax2.set_title("2. Filtered Signal (Bandpass 0.7 - 3.0 Hz)")
-    ax2.set_ylabel("Amplitude")
+        # 2. Filtered Signal
+        line2, = ax2.plot([], [], 'b-')
+        ax2.set_title("2. Filtered Signal (Bandpass 0.7 - 3.0 Hz)")
+        ax2.set_ylabel("Amplitude")
 
-    # 3. Frequency Spectrum (Welch)
-    line3, = ax3.plot([], [], 'r-')
-    ax3.set_title("3. Welch's PSD (Frequency Domain)")
-    ax3.set_xlabel("Frequency (Hz)")
-    ax3.set_ylabel("Power")
-    # ==========================================
+        # 3. Frequency Spectrum (Welch)
+        line3, = ax3.plot([], [], 'r-')
+        ax3.set_title("3. Welch's PSD (Frequency Domain)")
+        ax3.set_xlabel("Frequency (Hz)")
+        ax3.set_ylabel("Power")
+        # ==========================================
 
     with WebcamStream(camera_index=0) as cam:
         logging.info("Starting rPPG processing loop...")
@@ -57,7 +61,7 @@ def main():
             if face_box:
                 roi_box = detector.get_rppg_roi(face_box)
                 
-                # Extract the signal!
+                # Extract the signal
                 current_value = processor.extract_and_buffer(frame, roi_box)  # noqa: F841
                 
                 # Draw the bounding box
@@ -71,33 +75,35 @@ def main():
                     text = f"BPM: {bpm:.1f}"
                     cv2.putText(frame, text, (rx, ry - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
                     
-                    # Update Plot 3: Frequency Spectrum
-                    line3.set_xdata(freqs)
-                    line3.set_ydata(psd)
-                    ax3.relim()
-                    ax3.autoscale_view()
+                    if DEBUG_MODE:
+                        # Update Plot 3: Frequency Spectrum
+                        line3.set_xdata(freqs)
+                        line3.set_ydata(psd)
+                        ax3.relim()
+                        ax3.autoscale_view()
                 else:
                     cv2.putText(frame, "Calcul BPM...", (rx, ry - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-                # Update Plots 1 & 2 every frame
-                signal_data, _ = processor.get_signal_data()
-                filtered_data = processor.get_filtered_signal()
+                if DEBUG_MODE:
+                    # Update Plots 1 & 2 every frame
+                    signal_data, _ = processor.get_signal_data()
+                    filtered_data = processor.get_filtered_signal()
 
-                if len(signal_data) > 10:
-                    line1.set_xdata(range(len(signal_data)))
-                    line1.set_ydata(signal_data)
-                    ax1.relim()
-                    ax1.autoscale_view()
+                    if len(signal_data) > 10:
+                        line1.set_xdata(range(len(signal_data)))
+                        line1.set_ydata(signal_data)
+                        ax1.relim()
+                        ax1.autoscale_view()
 
-                if filtered_data is not None:
-                    line2.set_xdata(range(len(filtered_data)))
-                    line2.set_ydata(filtered_data)
-                    ax2.relim()
-                    ax2.autoscale_view()
+                    if filtered_data is not None:
+                        line2.set_xdata(range(len(filtered_data)))
+                        line2.set_ydata(filtered_data)
+                        ax2.relim()
+                        ax2.autoscale_view()
 
-                # Draw the updated graphs
-                fig.canvas.draw()
-                fig.canvas.flush_events()
+                    # Draw the updated graphs
+                    fig.canvas.draw()
+                    fig.canvas.flush_events()
 
             cv2.imshow("rPPG - Live Feed", frame)
 

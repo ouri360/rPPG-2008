@@ -12,6 +12,9 @@ import logging
 import numpy as np
 from typing import Tuple, Optional
 
+# Exponential Moving Average factor for bounding box smoothing (lower = smoother, but lags more)
+SMOOTHING_FACTOR = 0.2 
+
 class FaceDetector:
     """
     A lightweight face detection module using Haar Cascades method, optimized for rPPG applications.
@@ -22,6 +25,10 @@ class FaceDetector:
         # OpenCV provides default cascades; we use the standard frontal face model
         cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
         self.face_cascade = cv2.CascadeClassifier(cascade_path)
+
+        # Store the previous bounding box for smoothing
+        self.prev_roi = None 
+        self.alpha = SMOOTHING_FACTOR
         
         if self.face_cascade.empty():
             raise RuntimeError("Critical Error: Failed to load Haar Cascade XML file.")
@@ -77,5 +84,19 @@ class FaceDetector:
         roi_y = int(y + (h * 0.10))
         roi_w = int(w * 0.60)
         roi_h = int(h * 0.70)
+
+        current_roi = (roi_x, roi_y, roi_w, roi_h)
+
+        # Smooth the bounding box over time to prevent jitter
+        if self.prev_roi is None:
+            self.prev_roi = current_roi
+        else:
+            # Apply Exponential Moving Average (EMA)
+            smoothed_roi = tuple(
+                int(self.alpha * curr + (1 - self.alpha) * prev) 
+                for curr, prev in zip(current_roi, self.prev_roi)
+            )
+            self.prev_roi = smoothed_roi
+            return smoothed_roi
         
-        return (roi_x, roi_y, roi_w, roi_h)
+        return current_roi
