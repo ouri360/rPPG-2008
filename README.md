@@ -15,7 +15,7 @@ This project extracts a human heart rate (BPM) from a standard webcam feed using
 
 While based on the 2008 paper, this implementation introduces several modern DSP upgrades to make the system robust under real-world lighting and motion conditions:
 
-1. **Hardware Locking:** Disables webcam Auto-Exposure and Auto-White Balance via `v4l2`/DirectShow to prevent artificial signal spikes.
+1. **Hardware Locking:** Disables webcam Auto-Exposure and Auto-White Balance to prevent artificial signal spikes.
 2. **Facial Tracking (Viola-Jones):** Uses OpenCV Haar Cascades with **Exponential Moving Average (EMA) smoothing** on the bounding box to eliminate high-frequency spatial jitter.
 3. **Signal Extraction:** Isolates the Region of Interest (ROI) and calculates the spatial average of the **Green Channel** (where hemoglobin absorption is highest) into a rolling time-series buffer.
 4. **Pre-Processing (Detrending):** Applies linear detrending to eliminate baseline wander caused by slow postural movements or ambient light shifts, preventing IIR filter ringing.
@@ -39,7 +39,9 @@ rPPG-2008/
 ├── main.py          # Entry point & Matplotlib visualization dashboard
 └── README.md
 
-🚀 Installation & Setup
+---
+
+## 🚀 Installation & Setup
 Dependencies
 
 The project relies on the following standard and third-party libraries:
@@ -58,14 +60,16 @@ pip install opencv-python numpy scipy matplotlib
 
 Option B: Nvidia Jetson Nano (Edge Deployment)
 
-⚠️ IMPORTANT: Do not use pip install opencv-python on the Jetson Nano, as it will overwrite Nvidia's hardware-accelerated JetPack binaries. Use the apt package manager for heavy math libraries on ARM64 architectures.
+⚠️ **IMPORTANT**: Do not use pip install opencv-python on the Jetson Nano, as it will overwrite Nvidia's hardware-accelerated JetPack binaries. Use the apt package manager for heavy math libraries on ARM64 architectures.
 
 git clone [https://github.com/ouri360/rPPG-2008.git](https://github.com/ouri360/rPPG-2008.git)
 cd rPPG-2008
 sudo apt-get update
 sudo apt-get install python3-scipy python3-numpy python3-matplotlib
 
-💻 Usage
+---
+
+## 💻 Usage
 
 Run the main pipeline:
 
