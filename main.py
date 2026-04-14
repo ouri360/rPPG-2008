@@ -44,7 +44,7 @@ def main():
         ax4.set_xlabel("Frequency (Hz)")
         ax4.set_ylabel("Power")
 
-    VIDEO_SOURCE = 0 # Or set to "dataset/subject1.mp4"
+    VIDEO_SOURCE = "dataset/subject1.mp4" # Or set to "dataset/subject1.mp4"
 
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         
@@ -72,6 +72,12 @@ def main():
                     break # ONLY THE FOREHEAD
 
                 fx, fy, fw, fh = face_box
+
+                # === NEW: Real FPS display on the OpenCV window ===
+                current_fps = processor.get_current_fps()
+                fps_text = f"FPS: {current_fps:.1f}"
+                cv2.putText(frame, fps_text, (fx, fy - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                # ==================================================    
 
                 # Unpack the 4 variables from the new method
                 bpm, freqs, raw_mag, filt_mag = processor.estimate_heart_rate()

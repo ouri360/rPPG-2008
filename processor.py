@@ -94,19 +94,31 @@ class SignalProcessor:
         # We need a minimum amount of data to filter properly (e.g. 3 seconds)
         if len(self.raw_signal) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None
+
+        signal = np.array(self.raw_signal)
+        ts = np.array(self.timestamps)
         
-        # Remove linear baseline drift before filtering
-        raw_detrended_signal = self.raw_signal - np.mean(self.raw_signal)
-        signal = np.array(raw_detrended_signal)
+        if len(ts) < 2:
+            return None
+
+        # ==========================================
+        # UPGRADE 1: Uniform Resampling
+        # Fixes camera stutter by creating a perfect time grid
+        # ==========================================
+        dt = 1.0 / self.target_fps
+        t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
+        signal_uniform = np.interp(t_uniform, ts, signal)
         
-        # 1. Design the filter
+        # Detrend the newly uniform signal
+        signal_uniform = signal_uniform - np.mean(signal_uniform)
+        
         lowcut = LOWCUT_HZ
         highcut = HIGHCUT_HZ
         order = ORDER
         
-        # Use SOS instead of b,a
+        # Use our SOS high-precision filter instead of b, a
         sos = butter(order, [lowcut, highcut], btype='bandpass', fs=self.target_fps, output='sos')
-        filtered_signal = sosfiltfilt(sos, signal)
+        filtered_signal = sosfiltfilt(sos, signal_uniform)
         
         return filtered_signal
     
@@ -114,8 +126,13 @@ class SignalProcessor:
         if len(self.raw_signal) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None, None, None, None
 
-        # 1. Get both signals
-        raw_detrended_signal = self.raw_signal - np.mean(self.raw_signal)
+        # 1. Resample and detrend the raw signal to match the uniform filtered signal
+        ts = np.array(self.timestamps)
+        dt = 1.0 / self.target_fps
+        t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
+        raw_uniform = np.interp(t_uniform, ts, np.array(self.raw_signal))
+        raw_detrended_signal = raw_uniform - np.mean(raw_uniform)
+
         filtered_signal = self.get_filtered_signal()
         
         if filtered_signal is None:
@@ -128,41 +145,55 @@ class SignalProcessor:
         windowed_raw = raw_detrended_signal * window
         windowed_filt = filtered_signal * window
         
-        # 3. Compute the FFTs
+        # 3. Compute the Power Spectra (Magnitude Squared)
         fft_raw_complex = np.fft.rfft(windowed_raw, n=n_fft)
-        raw_magnitude = (np.abs(fft_raw_complex)**2) 
+        raw_power = (np.abs(fft_raw_complex)**2) 
         
         fft_filtered_complex = np.fft.rfft(windowed_filt, n=n_fft)
-        filtered_magnitude = (np.abs(fft_filtered_complex)**2)
+        filtered_power = (np.abs(fft_filtered_complex)**2)
         
         frequencies = np.fft.rfftfreq(n_fft, d=1.0/self.target_fps)
 
-        # ==========================================
-        # VISUALIZATION MASK (0.0 to 3.0 Hz)
-        # We send this wide view to the Matplotlib dashboard
-        # ==========================================
+        # Matplotlib Dashboard Mask (0.0 to 3.0 Hz)
         plot_indices = np.where((frequencies >= 0.0) & (frequencies <= 3.0))[0]
         plot_freqs = frequencies[plot_indices]
-        plot_raw_mag = raw_magnitude[plot_indices]
-        plot_filt_mag = filtered_magnitude[plot_indices]
+        plot_raw_mag = raw_power[plot_indices]
+        plot_filt_mag = filtered_power[plot_indices]
         
-        # ==========================================
-        # BPM CALCULATION MASK (0.7 to 2.5 Hz)
-        # We strictly calculate the Heart Rate in the human passband
-        # ==========================================
+        # BPM Calculation Mask
         bpm_indices = np.where((frequencies >= LOWCUT_HZ) & (frequencies <= HIGHCUT_HZ))[0]
         bpm_freqs = frequencies[bpm_indices]
-        bpm_filt_mag = filtered_magnitude[bpm_indices]
+        bpm_filt_mag = filtered_power[bpm_indices]
         
-        # 4. Calculate BPM using the strictly masked array
+        # 4. Find the Peak
         peak_index = np.argmax(bpm_filt_mag)
         dominant_freq = bpm_freqs[peak_index]
         
+        # ==========================================
+        # UPGRADE 2: Parabolic Sub-bin Interpolation
+        # Calculates the true vertex between frequency bins
+        # ==========================================
+        if 0 < peak_index < len(bpm_filt_mag) - 1:
+            y0, y1, y2 = bpm_filt_mag[peak_index-1 : peak_index+2]
+            if (y0 - 2*y1 + y2) != 0: # Avoid division by zero
+                x = 0.5 * (y0 - y2) / (y0 - 2*y1 + y2)
+                df = bpm_freqs[1] - bpm_freqs[0]
+                dominant_freq += x * df
+        # ==========================================
+
         raw_bpm = dominant_freq * 60.0
         
-        # Apply the rolling average smoothing
         self.bpm_buffer.append(raw_bpm)
         smoothed_bpm = sum(self.bpm_buffer) / len(self.bpm_buffer)
         
-        # Return the WIDE arrays for the dashboard, and the smoothed BPM
         return smoothed_bpm, plot_freqs, plot_raw_mag, plot_filt_mag
+    
+    def get_current_fps(self) -> float:
+        """Returns actual measured FPS from the last ~1 second of timestamps."""
+        if len(self.timestamps) < 2:
+            return 0.0
+        # Use last 30 samples (≈1 second) for a stable reading
+        recent_ts = np.array(self.timestamps)[-30:]
+        if len(recent_ts) < 2:
+            return 0.0
+        return 1.0 / np.mean(np.diff(recent_ts))
