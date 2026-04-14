@@ -99,7 +99,7 @@ class SignalProcessor:
         # Remove linear baseline drift before filtering (useful for changes in lighting or subject movement)
         signal = detrend(signal)
         
-        # 1. Design the filter (e.g. 0.7 Hz to 3.0 Hz covers ~42 to 180 BPM)
+        # 1. Design the filter
         lowcut = LOWCUT_HZ
         highcut = HIGHCUT_HZ
         order = ORDER
@@ -112,49 +112,55 @@ class SignalProcessor:
         
         return filtered_signal
     
-    def estimate_heart_rate(self) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
+    def estimate_heart_rate(self) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
         """
-        Calculates the Standard FFT and returns the BPM along with frequency data for plotting.
-        Returns: (smoothed_bpm, frequencies_array, magnitude_array)
+        Calculates the Raw FFT and Filtered FFT.
+        Returns: (smoothed_bpm, frequencies, raw_magnitude, filtered_magnitude)
         """
+        # We need a minimum amount of data
+        if len(self.raw_signal) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
+            return None, None, None, None
+
+        # 1. Get the Detrended Raw Signal
+        # We detrend it before the FFT so the massive DC offset (0 Hz) doesn't leak into our heart rate bins
+        #raw_detrended_signal = detrend(np.array(self.raw_signal))
+        raw_detrended_signal = self.raw_signal
+        
+        # 2. Get the Filtered Signal
         filtered_signal = self.get_filtered_signal()
         
         if filtered_signal is None:
-            return None, None, None
+            return None, None, None, None
             
-        n_fft = NFFT # Zero-padding to maintain decimal precision for BPM
+        n_fft = NFFT
         
         # ==========================================
-        # DSP UPGRADE: Apply a Hanning Window to stop Spectral Leakage
+        # 3. COMPUTE BOTH FFTS
         # ==========================================
-        window = np.hanning(len(filtered_signal))
-        windowed_signal = filtered_signal * window
+        # FFT Before Filter
+        fft_raw_complex = np.fft.rfft(raw_detrended_signal, n=n_fft)
+        raw_magnitude = np.abs(fft_raw_complex)
         
-        # 1. Compute the Standard 1D Discrete Fourier Transform
-        fft_complex = np.fft.rfft(windowed_signal, n=n_fft)
+        # FFT After Filter
+        fft_filtered_complex = np.fft.rfft(filtered_signal, n=n_fft)
+        filtered_magnitude = np.abs(fft_filtered_complex)
         # ==========================================
         
-        # 2. Extract the magnitude (absolute value) from the complex numbers
-        fft_magnitude = np.abs(fft_complex)
-        
-        # 3. Generate the corresponding frequency bins
-        # d is the sample spacing (inverse of framerate)
+        # 4. Generate frequency bins and mask them (0.7 to 2.5 Hz)
         frequencies = np.fft.rfftfreq(n_fft, d=1.0/self.target_fps)
-        
-        # 4. Mask the arrays to strictly look at human heart rates (0.7 to 3.0 Hz)
         valid_indices = np.where((frequencies >= LOWCUT_HZ) & (frequencies <= HIGHCUT_HZ))[0]
         
         valid_frequencies = frequencies[valid_indices]
-        valid_magnitude = fft_magnitude[valid_indices]
+        valid_raw_mag = raw_magnitude[valid_indices]
+        valid_filt_mag = filtered_magnitude[valid_indices]
         
-        # 5. Find the peak frequency
-        peak_index = np.argmax(valid_magnitude)
+        # 5. Find the peak frequency on the FILTERED signal
+        peak_index = np.argmax(valid_filt_mag)
         dominant_freq = valid_frequencies[peak_index]
-        
         raw_bpm = dominant_freq * 60.0
         
         # Apply the rolling average smoothing
         self.bpm_buffer.append(raw_bpm)
         smoothed_bpm = sum(self.bpm_buffer) / len(self.bpm_buffer)
         
-        return smoothed_bpm, valid_frequencies, valid_magnitude
+        return smoothed_bpm, valid_frequencies, valid_raw_mag, valid_filt_mag
