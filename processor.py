@@ -22,8 +22,8 @@ BUFFER_AVERAGE = 15     # Number of BPM estimates to average for smoothing
 # Filter parameters for bandpass filter (these can be tuned based on expected heart rate range)
 LOWCUT_HZ = 0.7         # Corresponds to ~42 BPM
 HIGHCUT_HZ = 2.5        # Corresponds to ~150 BPM
-ORDER = 2               # Filter order (2nd order Butterworth is a common choice for rPPG)
-NFFT = 2048             # Number of points for FFT (zero-padding for better frequency resolution)
+ORDER = 4               # Filter order (2nd order Butterworth is a common choice for rPPG)
+NFFT = 8192             # Number of points for FFT (zero-padding for better frequency resolution)
 
 class SignalProcessor:
     """

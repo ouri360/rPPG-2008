@@ -34,7 +34,8 @@ def main():
         ax2.set_title("2. Filtered Signal (Bandpass 0.7 - 3.0 Hz)")
         ax2.set_ylabel("Amplitude")
 
-        ax3.set_title("3. Standard FFT Magnitude (Frequency Domain)")
+        line3, = ax3.plot([], [], 'r-')
+        ax3.set_title("3. FFT (Frequency Domain)")
         ax3.set_xlabel("Frequency (Hz)")
         ax3.set_ylabel("Magnitude")
 
@@ -44,17 +45,20 @@ def main():
     #VIDEO_SOURCE = "dataset/subject1.mp4" # Or set to 0 for webcam
     VIDEO_SOURCE = 0
 
-    fft_bars = None
 
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         
         processor = SignalProcessor(buffer_seconds=10, target_fps=cam.fps)
         logging.info("Démarrage de la boucle de traitement rPPG Multi-ROI...")
         
+        frame_counter = 0
+
         while True:
             success, frame = cam.read_frame()
             if not success: 
                 break
+
+            frame_counter += 1
 
             # 1. Detect the main face
             face_box = detector.detect_largest_face(frame)
@@ -79,38 +83,38 @@ def main():
                 if bpm is not None:
                     text = f"BPM: {bpm:.1f}"
                     cv2.putText(frame, text, (fx, fy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-                    
-                    if DEBUG_MODE:
-                        # If the bars don't exist yet, create them
-                        if fft_bars is None:
-                            # width determines how thick the bars are. 0.02 looks good for this Hz range.
-                            fft_bars = ax3.bar(freqs, magnitude, width=0.02, color='red', align='center')
-                        else:
-                            # If they exist, strictly update their heights for maximum performance
-                            for bar, new_height in zip(fft_bars, magnitude):
-                                bar.set_height(new_height)
-                        
-                        ax3.relim()
-                        ax3.autoscale_view()
                 else:
                     cv2.putText(frame, "Calcul BPM...", (fx, fy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-                if DEBUG_MODE:
+                if DEBUG_MODE and (frame_counter % 3 == 0):
                     signal_data, _ = processor.get_signal_data()
                     filtered_data = processor.get_filtered_signal()
 
+                    # Update Line 1
                     if len(signal_data) > 10:
                         line1.set_xdata(range(len(signal_data)))
                         line1.set_ydata(signal_data)
                         ax1.relim()
                         ax1.autoscale_view()
 
+                    # Update Line 2
                     if filtered_data is not None:
                         line2.set_xdata(range(len(filtered_data)))
                         line2.set_ydata(filtered_data)
                         ax2.relim()
                         ax2.autoscale_view()
 
+                    # Update Graph 3
+                    if bpm is not None:
+                        line3.set_xdata(freqs)
+                        line3.set_ydata(magnitude)
+                        ax3.relim()
+                        ax3.autoscale_view()
+                        
+                        ax3.relim()
+                        ax3.autoscale_view()
+
+                    # Execute the render
                     fig.canvas.draw()
                     fig.canvas.flush_events()
 
