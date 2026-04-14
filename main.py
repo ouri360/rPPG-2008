@@ -7,6 +7,7 @@ Displays a 4-panel live plot showing Time and Frequency domains before and after
 
 import cv2
 import logging
+import time
 import matplotlib.pyplot as plt
 from webcam import WebcamStream
 from detector import FaceDetector
@@ -56,22 +57,21 @@ def main():
         logging.info("Démarrage de la boucle de traitement rPPG Multi-ROI...")
         
         frame_counter = 0
+        last_valid_timestamp = -1.0
 
         while True:
             success, frame = cam.read_frame()
+            arrival_time = time.perf_counter()
+
             if not success: 
                 break
 
             frame_counter += 1
 
-            # === BUG FIX 1: Retrieve actual video/hardware timestamps ===
-            # Try to get the hardware timestamp in seconds
-            timestamp = cam.cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
-
-            # Fallback: If live webcam returns 0.0, calculate perfect theoretical time
-            if timestamp <= 0.0:
-                timestamp = frame_counter / cam.fps
-            # ============================================================
+            # ==================================================
+            # Completely prevents "Clock Beating" and 1Hz interpolation harmonics
+            # ==================================================
+            timestamp = frame_counter / cam.fps
 
             face_box = detector.detect_largest_face(frame)
 

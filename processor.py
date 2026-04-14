@@ -13,7 +13,7 @@ import time
 import logging
 from collections import deque
 from typing import Tuple, Optional
-from scipy.signal import butter, sosfiltfilt, detrend
+from scipy.signal import butter, sosfiltfilt, detrend, medfilt
 
 # Minimum number of seconds required to perform filtering and FFT analysis
 MINIMUM_AMOUNT_OF_DATA = 3 
@@ -90,10 +90,6 @@ class SignalProcessor:
         return np.array(self.raw_signal), np.array(self.timestamps)
     
     def get_filtered_signal(self) -> Optional[np.ndarray]:
-        """
-        Applies a zero-phase Butterworth bandpass filter to the raw signal.
-        """
-        # We need a minimum amount of data to filter properly (e.g. 3 seconds)
         if len(self.raw_signal) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None
 
@@ -103,22 +99,29 @@ class SignalProcessor:
         if len(ts) < 2:
             return None
 
-        # ==========================================
-        # UPGRADE 1: Uniform Resampling
-        # Fixes camera stutter by creating a perfect time grid
-        # ==========================================
+        # 1. Uniform Resampling
         dt = 1.0 / self.target_fps
         t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
         signal_uniform = np.interp(t_uniform, ts, signal)
         
-        # Detrend the newly uniform signal
+        # 2. Detrend the newly uniform signal
         signal_uniform = detrend(signal_uniform)
         
+        # ==========================================
+        # THE TRUE FIX: Z-Score Artifact Clamping
+        # Clamps massive movement spikes without distorting the pulse wave
+        # ==========================================
+        std_val = np.std(signal_uniform)
+        if std_val > 0:
+            # 2.0 Standard Deviations leaves the heartbeat untouched, but kills blinks.
+            signal_uniform = np.clip(signal_uniform, -2.0 * std_val, 2.0 * std_val)
+        # ==========================================
+
         lowcut = LOWCUT_HZ
         highcut = HIGHCUT_HZ
         order = ORDER
         
-        # Use our SOS high-precision filter instead of b, a
+        # 3. Apply the High-Precision Butterworth
         sos = butter(order, [lowcut, highcut], btype='bandpass', fs=self.target_fps, output='sos')
         filtered_signal = sosfiltfilt(sos, signal_uniform)
         
@@ -128,12 +131,17 @@ class SignalProcessor:
         if len(self.raw_signal) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None, None, None, None
 
-        # 1. Resample and detrend the raw signal to match the uniform filtered signal
+        # 1. Resample and detrend the raw signal
         ts = np.array(self.timestamps)
         dt = 1.0 / self.target_fps
         t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
         raw_uniform = np.interp(t_uniform, ts, np.array(self.raw_signal))
         raw_detrended_signal = detrend(raw_uniform)
+
+        # Apply the exact same Median Filter here so the Raw FFT graph matches reality
+        kernel_size = int(self.target_fps * 0.25)
+        kernel_size = kernel_size if kernel_size % 2 != 0 else kernel_size + 1
+        raw_detrended_signal = medfilt(raw_detrended_signal, kernel_size)
 
         filtered_signal = self.get_filtered_signal()
         
@@ -147,7 +155,7 @@ class SignalProcessor:
         windowed_raw = raw_detrended_signal * window
         windowed_filt = filtered_signal * window
         
-        # 3. Compute the Power Spectra (Magnitude Squared)
+        # 3. Compute the Power Spectra
         fft_raw_complex = np.fft.rfft(windowed_raw, n=n_fft)
         raw_power = (np.abs(fft_raw_complex)**2) 
         
@@ -156,13 +164,13 @@ class SignalProcessor:
         
         frequencies = np.fft.rfftfreq(n_fft, d=1.0/self.target_fps)
 
-        # Matplotlib Dashboard Mask (0.0 to 3.0 Hz)
+        # Dashbaord arrays
         plot_indices = np.where((frequencies >= 0.0) & (frequencies <= 3.0))[0]
         plot_freqs = frequencies[plot_indices]
         plot_raw_mag = raw_power[plot_indices]
         plot_filt_mag = filtered_power[plot_indices]
         
-        # BPM Calculation Mask
+        # BPM Arrays
         bpm_indices = np.where((frequencies >= LOWCUT_HZ) & (frequencies <= HIGHCUT_HZ))[0]
         bpm_freqs = frequencies[bpm_indices]
         bpm_filt_mag = filtered_power[bpm_indices]
@@ -171,36 +179,16 @@ class SignalProcessor:
         peak_index = np.argmax(bpm_filt_mag)
         dominant_freq = bpm_freqs[peak_index]
         
-        # ==========================================
-        # UPGRADE 2: Parabolic Sub-bin Interpolation
-        # Calculates the true vertex between frequency bins
-        # ==========================================
+        # Parabolic Sub-bin Interpolation
         if 0 < peak_index < len(bpm_filt_mag) - 1:
             y0, y1, y2 = bpm_filt_mag[peak_index-1 : peak_index+2]
-            if (y0 - 2*y1 + y2) != 0: # Avoid division by zero
+            if (y0 - 2*y1 + y2) != 0: 
                 x = 0.5 * (y0 - y2) / (y0 - 2*y1 + y2)
                 df = bpm_freqs[1] - bpm_freqs[0]
                 dominant_freq += x * df
-        # ==========================================
 
         raw_bpm = dominant_freq * 60.0
         
-        # ==========================================
-        # FIX 2: Medical Outlier Rejection
-        # A human heart cannot jump by 10+ BPM instantly. 
-        # If it does, we know it's a traveling Hanning artifact.
-        # ==========================================
-        if self.last_valid_bpm is not None:
-            # If the jump is larger than 10 BPM in a fraction of a second...
-            if abs(raw_bpm - self.last_valid_bpm) > 10.0:
-                # Reject the noise! Feed the last known stable BPM into the buffer instead.
-                raw_bpm = self.last_valid_bpm
-                
-        # Update the tracker with the verified BPM
-        self.last_valid_bpm = raw_bpm
-        # ==========================================
-
-        # Add to our new, longer 5-second smoothing buffer
         self.bpm_buffer.append(raw_bpm)
         smoothed_bpm = sum(self.bpm_buffer) / len(self.bpm_buffer)
         
@@ -210,8 +198,14 @@ class SignalProcessor:
         """Returns actual measured FPS from the last ~1 second of timestamps."""
         if len(self.timestamps) < 2:
             return 0.0
-        # Use last 30 samples (≈1 second) for a stable reading
+            
         recent_ts = np.array(self.timestamps)[-30:]
         if len(recent_ts) < 2:
             return 0.0
-        return 1.0 / np.mean(np.diff(recent_ts))
+            
+        # Protect against division by zero if timestamps ever get completely stuck
+        mean_diff = float(np.mean(np.diff(recent_ts)))
+        if mean_diff <= 0.0:
+            return self.target_fps # Fallback to the target FPS safely
+            
+        return 1.0 / mean_diff
