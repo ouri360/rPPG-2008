@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from webcam import WebcamStream
 from detector import FaceDetector
 from processor import SignalProcessor
+from gt import GroundTruthReader
 
 DEBUG_MODE = False
 
@@ -44,7 +45,10 @@ def main():
         ax4.set_xlabel("Frequency (Hz)")
         ax4.set_ylabel("Power")
 
-    VIDEO_SOURCE = 0 # Or set to "dataset/subject1.mp4"
+    VIDEO_SOURCE = "dataset/subject1.mp4" # Or set to "dataset/subject1.mp4"
+    GT_FILE = "dataset/gt_subject1.txt"
+    # Initialize the Ground Truth Reader
+    gt_reader = GroundTruthReader(GT_FILE)
 
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         
@@ -95,6 +99,16 @@ def main():
                     cv2.putText(frame, text, (fx, fy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
                 else:
                     cv2.putText(frame, "Calcul BPM...", (fx, fy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+                # ==================================================
+                # Compare with UBFC Ground Truth
+                # ==================================================
+                gt_hr = gt_reader.get_hr_at_time(timestamp)
+                if gt_hr is not None:
+                    # Draw the Ground truth in Green, slightly below the bounding box
+                    gt_text = f"True HR: {gt_hr:.1f}"
+                    cv2.putText(frame, gt_text, (fx, fy + fh + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                # ==================================================
 
                 # GUI Downsampling (Draw every 3 frames)
                 if DEBUG_MODE and (frame_counter % 3 == 0):

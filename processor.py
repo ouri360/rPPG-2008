@@ -17,7 +17,6 @@ from scipy.signal import butter, sosfiltfilt, detrend
 
 # Minimum number of seconds required to perform filtering and FFT analysis
 MINIMUM_AMOUNT_OF_DATA = 3 
-BUFFER_AVERAGE = 30     # Number of BPM estimates to average for smoothing
 # Filter parameters for bandpass filter (these can be tuned based on expected heart rate range)
 LOWCUT_HZ = 0.9         # Corresponds to ~54 BPM
 HIGHCUT_HZ = 2          # Corresponds to ~120 BPM
@@ -45,7 +44,7 @@ class SignalProcessor:
         self.raw_signal = deque(maxlen=self.max_length)
         self.timestamps = deque(maxlen=self.max_length)
 
-        # Buffer for smoothing BPM estimates over time (average over the last 30 estimates)
+        # Buffer for smoothing BPM estimates over time (average over the last 5 seconds)
         smoothing_frames = int(self.target_fps * 5)
         self.bpm_buffer = deque(maxlen=smoothing_frames) 
 
