@@ -19,9 +19,9 @@ from scipy.signal import butter, filtfilt, detrend
 MINIMUM_AMOUNT_OF_DATA = 3 
 BUFFER_AVERAGE = 15     # Number of BPM estimates to average for smoothing
 # Filter parameters for bandpass filter (these can be tuned based on expected heart rate range)
-LOWCUT_HZ = 0.7         # Corresponds to ~42 BPM
-HIGHCUT_HZ = 2.5        # Corresponds to ~150 BPM
-ORDER = 4               # Filter order (2nd order Butterworth is a common choice for rPPG)
+LOWCUT_HZ = 0.9         # Corresponds to ~54 BPM
+HIGHCUT_HZ = 2          # Corresponds to ~120 BPM
+ORDER = 4               # Filter order
 NFFT = 8192             # Number of points for FFT (zero-padding for better frequency resolution)
 
 class SignalProcessor:
@@ -73,6 +73,7 @@ class SignalProcessor:
             # Calculate mean and apply the specific weight for this region
             region_mean = float(np.mean(green_channel))
             weighted_sum += region_mean * weights[region_name]
+            break # ONLY THE FOREHEAD
 
         # Buffer the final weighted value
         self.raw_signal.append(weighted_sum)
@@ -113,20 +114,11 @@ class SignalProcessor:
         return filtered_signal
     
     def estimate_heart_rate(self) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
-        """
-        Calculates the Raw FFT and Filtered FFT.
-        Returns: (smoothed_bpm, frequencies, raw_magnitude, filtered_magnitude)
-        """
-        # We need a minimum amount of data
         if len(self.raw_signal) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None, None, None, None
 
-        # 1. Get the Detrended Raw Signal
-        # We detrend it before the FFT so the massive DC offset (0 Hz) doesn't leak into our heart rate bins
-        #raw_detrended_signal = detrend(np.array(self.raw_signal))
-        raw_detrended_signal = self.raw_signal
-        
-        # 2. Get the Filtered Signal
+        # 1. Get both signals
+        raw_detrended_signal = detrend(np.array(self.raw_signal))
         filtered_signal = self.get_filtered_signal()
         
         if filtered_signal is None:
@@ -134,33 +126,46 @@ class SignalProcessor:
             
         n_fft = NFFT
         
-        # ==========================================
-        # 3. COMPUTE BOTH FFTS
-        # ==========================================
-        # FFT Before Filter
-        fft_raw_complex = np.fft.rfft(raw_detrended_signal, n=n_fft)
+        # 2. Apply the Hanning Window
+        window = np.hanning(len(filtered_signal))
+        windowed_raw = raw_detrended_signal * window
+        windowed_filt = filtered_signal * window
+        
+        # 3. Compute the FFTs
+        fft_raw_complex = np.fft.rfft(windowed_raw, n=n_fft)
         raw_magnitude = np.abs(fft_raw_complex)
         
-        # FFT After Filter
-        fft_filtered_complex = np.fft.rfft(filtered_signal, n=n_fft)
+        fft_filtered_complex = np.fft.rfft(windowed_filt, n=n_fft)
         filtered_magnitude = np.abs(fft_filtered_complex)
-        # ==========================================
         
-        # 4. Generate frequency bins and mask them (0.7 to 2.5 Hz)
         frequencies = np.fft.rfftfreq(n_fft, d=1.0/self.target_fps)
-        valid_indices = np.where((frequencies >= LOWCUT_HZ) & (frequencies <= HIGHCUT_HZ))[0]
+
+        # ==========================================
+        # VISUALIZATION MASK (0.0 to 3.0 Hz)
+        # We send this wide view to the Matplotlib dashboard
+        # ==========================================
+        plot_indices = np.where((frequencies >= 0.0) & (frequencies <= 3.0))[0]
+        plot_freqs = frequencies[plot_indices]
+        plot_raw_mag = raw_magnitude[plot_indices]
+        plot_filt_mag = filtered_magnitude[plot_indices]
         
-        valid_frequencies = frequencies[valid_indices]
-        valid_raw_mag = raw_magnitude[valid_indices]
-        valid_filt_mag = filtered_magnitude[valid_indices]
+        # ==========================================
+        # BPM CALCULATION MASK (0.7 to 2.5 Hz)
+        # We strictly calculate the Heart Rate in the human passband
+        # ==========================================
+        bpm_indices = np.where((frequencies >= LOWCUT_HZ) & (frequencies <= HIGHCUT_HZ))[0]
+        bpm_freqs = frequencies[bpm_indices]
+        bpm_filt_mag = filtered_magnitude[bpm_indices]
         
-        # 5. Find the peak frequency on the FILTERED signal
-        peak_index = np.argmax(valid_filt_mag)
-        dominant_freq = valid_frequencies[peak_index]
+        # 4. Calculate BPM using the strictly masked array
+        peak_index = np.argmax(bpm_filt_mag)
+        dominant_freq = bpm_freqs[peak_index]
+        
         raw_bpm = dominant_freq * 60.0
         
         # Apply the rolling average smoothing
         self.bpm_buffer.append(raw_bpm)
         smoothed_bpm = sum(self.bpm_buffer) / len(self.bpm_buffer)
         
-        return smoothed_bpm, valid_frequencies, valid_raw_mag, valid_filt_mag
+        # Return the WIDE arrays for the dashboard, and the smoothed BPM
+        return smoothed_bpm, plot_freqs, plot_raw_mag, plot_filt_mag
