@@ -90,41 +90,6 @@ class FaceDetector:
         # If it passed the checks, update the cache with the new face
         self.last_face_box = largest_face
         return largest_face
-
-    def get_rppg_roi(self, face_box: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
-        """
-        Shrinks the face bounding box to isolate the central region (cheeks/forehead),
-        eliminating noise from hair, background, and neck movement.
-
-        Args:
-            face_box (Tuple[int, int, int, int]): Original (x, y, w, h) face box.
-
-        Returns:
-            Tuple[int, int, int, int]: Cropped ROI (x, y, w, h).
-        """
-        x, y, w, h = face_box
-        
-        # Crop 20% off the left, right, and bottom. Crop 10% off the top (keep forehead).
-        roi_x = int(x + (w * 0.20))
-        roi_y = int(y + (h * 0.10))
-        roi_w = int(w * 0.60)
-        roi_h = int(h * 0.70)
-
-        current_roi = (roi_x, roi_y, roi_w, roi_h)
-
-        # Smooth the bounding box over time to prevent jitter
-        if self.prev_roi is None:
-            self.prev_roi = current_roi
-        else:
-            # Apply Exponential Moving Average (EMA)
-            smoothed_roi = tuple(
-                int(self.alpha * curr + (1 - self.alpha) * prev) 
-                for curr, prev in zip(current_roi, self.prev_roi)
-            )
-            self.prev_roi = smoothed_roi
-            return smoothed_roi
-        
-        return current_roi
     
     def get_multi_rois(self, face_box: Tuple[int, int, int, int]) -> dict:
         """

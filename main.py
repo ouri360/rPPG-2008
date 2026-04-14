@@ -110,9 +110,6 @@ def main():
                         line3.set_ydata(magnitude)
                         ax3.relim()
                         ax3.autoscale_view()
-                        
-                        ax3.relim()
-                        ax3.autoscale_view()
 
                     # Execute the render
                     fig.canvas.draw()
