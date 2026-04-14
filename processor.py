@@ -9,7 +9,6 @@ and estimating the heart rate using frequency analysis.
 """
 
 import numpy as np
-import time
 import logging
 from collections import deque
 from typing import Tuple, Optional
@@ -28,7 +27,7 @@ class SignalProcessor:
     Handles the extraction, filtering, buffering, and frequency analysis of the rPPG signal.
     """
 
-    def __init__(self, buffer_seconds: int = 10, target_fps: float = 30.0):
+    def __init__(self, buffer_seconds: int = 0.1, target_fps: float = 30.0):
         """
         Initializes rolling buffers for the signal and timestamps.
         
@@ -45,7 +44,7 @@ class SignalProcessor:
         self.timestamps = deque(maxlen=self.max_length)
 
         # Buffer for smoothing BPM estimates over time (average over the last 5 seconds)
-        smoothing_frames = int(self.target_fps * 5)
+        smoothing_frames = int(self.target_fps * 1)
         self.bpm_buffer = deque(maxlen=smoothing_frames) 
 
         # Tracker for Outlier Rejection
@@ -76,6 +75,7 @@ class SignalProcessor:
             # Calculate mean and apply the specific weight for this region
             region_mean = float(np.mean(green_channel))
             weighted_sum += region_mean * weights[region_name]
+            break
 
         # Buffer the final weighted value
         self.raw_signal.append(weighted_sum)
@@ -113,8 +113,8 @@ class SignalProcessor:
         # ==========================================
         std_val = np.std(signal_uniform)
         if std_val > 0:
-            # 2.0 Standard Deviations leaves the heartbeat untouched, but kills blinks.
-            signal_uniform = np.clip(signal_uniform, -2.0 * std_val, 2.0 * std_val)
+            # 3.0 Standard Deviations leaves the heartbeat untouched, but kills blinks.
+            signal_uniform = np.clip(signal_uniform, -3.0 * std_val, 3.0 * std_val)
         # ==========================================
 
         lowcut = LOWCUT_HZ
