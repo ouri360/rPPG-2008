@@ -100,10 +100,10 @@ class FaceDetector:
         x, y, w, h = face_box
         
         # 1. Forehead: Top center, avoiding the hairline and eyebrows
-        fh_x = int(x + (w * 0.25))
+        fh_x = int(x + (w * 0.30))
         fh_y = int(y + (h * 0.05))
-        fh_w = int(w * 0.50)
-        fh_h = int(h * 0.20)
+        fh_w = int(w * 0.40)
+        fh_h = int(h * 0.15)
         
         # 2. Left Cheek: Mid-left, avoiding the nose and eye
         lc_x = int(x + (w * 0.20))

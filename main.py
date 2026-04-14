@@ -36,13 +36,13 @@ def main():
         # 3. Raw FFT (Before Filter)
         line3, = ax3.plot([], [], 'r-')
         ax3.set_title("3. Raw FFT (Before Filter)")
-        ax3.set_ylabel("Magnitude")
+        ax3.set_ylabel("Power")
 
         # 4. Filtered FFT (After Filter)
         line4, = ax4.plot([], [], 'm-') # 'm-' is magenta line
         ax4.set_title("4. Filtered FFT (After Filter)")
         ax4.set_xlabel("Frequency (Hz)")
-        ax4.set_ylabel("Magnitude")
+        ax4.set_ylabel("Power")
 
     VIDEO_SOURCE = 0 # Or set to "dataset/subject1.mp4"
 
@@ -69,6 +69,7 @@ def main():
                 for region_name, box in multi_rois.items():
                     rx, ry, rw, rh = box
                     cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), (0, 255, 0), 2)
+                    break # ONLY THE FOREHEAD
 
                 fx, fy, fw, fh = face_box
 

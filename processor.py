@@ -13,7 +13,7 @@ import time
 import logging
 from collections import deque
 from typing import Tuple, Optional
-from scipy.signal import butter, filtfilt, detrend
+from scipy.signal import butter, sosfiltfilt, detrend
 
 # Minimum number of seconds required to perform filtering and FFT analysis
 MINIMUM_AMOUNT_OF_DATA = 3 
@@ -56,9 +56,9 @@ class SignalProcessor:
         """
         # Define the weights (must sum to 1.0)
         weights = {
-            'forehead': 0.60,
-            'left_cheek': 0.20,
-            'right_cheek': 0.20
+            'forehead': 1.00,
+            'left_cheek': 0.00,
+            'right_cheek': 0.00
         }
         
         weighted_sum = 0.0
@@ -94,22 +94,19 @@ class SignalProcessor:
         # We need a minimum amount of data to filter properly (e.g. 3 seconds)
         if len(self.raw_signal) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None
-
-        signal = np.array(self.raw_signal)
-
-        # Remove linear baseline drift before filtering (useful for changes in lighting or subject movement)
-        signal = detrend(signal)
+        
+        # Remove linear baseline drift before filtering
+        raw_detrended_signal = self.raw_signal - np.mean(self.raw_signal)
+        signal = np.array(raw_detrended_signal)
         
         # 1. Design the filter
         lowcut = LOWCUT_HZ
         highcut = HIGHCUT_HZ
         order = ORDER
         
-        # Calculate coefficients
-        b, a = butter(order, [lowcut, highcut], btype='bandpass', fs=self.target_fps)
-        
-        # 2. Apply the filter forward and backward (zero phase)
-        filtered_signal = filtfilt(b, a, signal)
+        # Use SOS instead of b,a
+        sos = butter(order, [lowcut, highcut], btype='bandpass', fs=self.target_fps, output='sos')
+        filtered_signal = sosfiltfilt(sos, signal)
         
         return filtered_signal
     
@@ -118,7 +115,7 @@ class SignalProcessor:
             return None, None, None, None
 
         # 1. Get both signals
-        raw_detrended_signal = detrend(np.array(self.raw_signal))
+        raw_detrended_signal = self.raw_signal - np.mean(self.raw_signal)
         filtered_signal = self.get_filtered_signal()
         
         if filtered_signal is None:
@@ -133,10 +130,10 @@ class SignalProcessor:
         
         # 3. Compute the FFTs
         fft_raw_complex = np.fft.rfft(windowed_raw, n=n_fft)
-        raw_magnitude = np.abs(fft_raw_complex)
+        raw_magnitude = (np.abs(fft_raw_complex)**2) 
         
         fft_filtered_complex = np.fft.rfft(windowed_filt, n=n_fft)
-        filtered_magnitude = np.abs(fft_filtered_complex)
+        filtered_magnitude = (np.abs(fft_filtered_complex)**2)
         
         frequencies = np.fft.rfftfreq(n_fft, d=1.0/self.target_fps)
 
