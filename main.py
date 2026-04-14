@@ -7,14 +7,13 @@ Displays a 4-panel live plot showing Time and Frequency domains before and after
 
 import cv2
 import logging
-import time
 import matplotlib.pyplot as plt
 from webcam import WebcamStream
 from detector import FaceDetector
 from processor import SignalProcessor
 from gt import GroundTruthReader
 
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 def main():
     detector = FaceDetector()
@@ -57,11 +56,9 @@ def main():
         logging.info("Démarrage de la boucle de traitement rPPG Multi-ROI...")
         
         frame_counter = 0
-        last_valid_timestamp = -1.0
 
         while True:
             success, frame = cam.read_frame()
-            arrival_time = time.perf_counter()
 
             if not success: 
                 break
