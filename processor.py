@@ -17,7 +17,7 @@ from scipy.signal import butter, sosfiltfilt, detrend
 
 # Minimum number of seconds required to perform filtering and FFT analysis
 MINIMUM_AMOUNT_OF_DATA = 3 
-BUFFER_AVERAGE = 15     # Number of BPM estimates to average for smoothing
+BUFFER_AVERAGE = 30     # Number of BPM estimates to average for smoothing
 # Filter parameters for bandpass filter (these can be tuned based on expected heart rate range)
 LOWCUT_HZ = 0.9         # Corresponds to ~54 BPM
 HIGHCUT_HZ = 2          # Corresponds to ~120 BPM
@@ -29,7 +29,7 @@ class SignalProcessor:
     Handles the extraction, filtering, buffering, and frequency analysis of the rPPG signal.
     """
 
-    def __init__(self, buffer_seconds: int = 10, target_fps: int = 30):
+    def __init__(self, buffer_seconds: int = 10, target_fps: float = 30.0):
         """
         Initializes rolling buffers for the signal and timestamps.
         
@@ -45,20 +45,24 @@ class SignalProcessor:
         self.raw_signal = deque(maxlen=self.max_length)
         self.timestamps = deque(maxlen=self.max_length)
 
-        # Buffer for smoothing BPM estimates over time (average over the last 15 estimates)
-        self.bpm_buffer = deque(maxlen=BUFFER_AVERAGE) 
+        # Buffer for smoothing BPM estimates over time (average over the last 30 estimates)
+        smoothing_frames = int(self.target_fps * 5)
+        self.bpm_buffer = deque(maxlen=smoothing_frames) 
+
+        # Tracker for Outlier Rejection
+        self.last_valid_bpm = None
         
         logging.info(f"SignalProcessor initialized with a {buffer_seconds}-second buffer.")
 
-    def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict) -> float:
+    def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict, timestamp: float) -> float:
         """
         Calculates a weighted spatial average from multiple ROIs.
         """
         # Define the weights (must sum to 1.0)
         weights = {
-            'forehead': 1.00,
-            'left_cheek': 0.00,
-            'right_cheek': 0.00
+            'forehead': 0.60,
+            'left_cheek': 0.20,
+            'right_cheek': 0.20
         }
         
         weighted_sum = 0.0
@@ -73,11 +77,10 @@ class SignalProcessor:
             # Calculate mean and apply the specific weight for this region
             region_mean = float(np.mean(green_channel))
             weighted_sum += region_mean * weights[region_name]
-            break # ONLY THE FOREHEAD
 
         # Buffer the final weighted value
         self.raw_signal.append(weighted_sum)
-        self.timestamps.append(time.time())
+        self.timestamps.append(timestamp)
 
         return weighted_sum
 
@@ -110,7 +113,7 @@ class SignalProcessor:
         signal_uniform = np.interp(t_uniform, ts, signal)
         
         # Detrend the newly uniform signal
-        signal_uniform = signal_uniform - np.mean(signal_uniform)
+        signal_uniform = detrend(signal_uniform)
         
         lowcut = LOWCUT_HZ
         highcut = HIGHCUT_HZ
@@ -131,7 +134,7 @@ class SignalProcessor:
         dt = 1.0 / self.target_fps
         t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
         raw_uniform = np.interp(t_uniform, ts, np.array(self.raw_signal))
-        raw_detrended_signal = raw_uniform - np.mean(raw_uniform)
+        raw_detrended_signal = detrend(raw_uniform)
 
         filtered_signal = self.get_filtered_signal()
         
@@ -183,6 +186,22 @@ class SignalProcessor:
 
         raw_bpm = dominant_freq * 60.0
         
+        # ==========================================
+        # FIX 2: Medical Outlier Rejection
+        # A human heart cannot jump by 10+ BPM instantly. 
+        # If it does, we know it's a traveling Hanning artifact.
+        # ==========================================
+        if self.last_valid_bpm is not None:
+            # If the jump is larger than 10 BPM in a fraction of a second...
+            if abs(raw_bpm - self.last_valid_bpm) > 10.0:
+                # Reject the noise! Feed the last known stable BPM into the buffer instead.
+                raw_bpm = self.last_valid_bpm
+                
+        # Update the tracker with the verified BPM
+        self.last_valid_bpm = raw_bpm
+        # ==========================================
+
+        # Add to our new, longer 5-second smoothing buffer
         self.bpm_buffer.append(raw_bpm)
         smoothed_bpm = sum(self.bpm_buffer) / len(self.bpm_buffer)
         

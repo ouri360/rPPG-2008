@@ -12,7 +12,7 @@ from webcam import WebcamStream
 from detector import FaceDetector
 from processor import SignalProcessor
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 def main():
     detector = FaceDetector()
@@ -44,7 +44,7 @@ def main():
         ax4.set_xlabel("Frequency (Hz)")
         ax4.set_ylabel("Power")
 
-    VIDEO_SOURCE = "dataset/subject1.mp4" # Or set to "dataset/subject1.mp4"
+    VIDEO_SOURCE = 0 # Or set to "dataset/subject1.mp4"
 
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         
@@ -60,16 +60,24 @@ def main():
 
             frame_counter += 1
 
+            # === BUG FIX 1: Retrieve actual video/hardware timestamps ===
+            # Try to get the hardware timestamp in seconds
+            timestamp = cam.cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+
+            # Fallback: If live webcam returns 0.0, calculate perfect theoretical time
+            if timestamp <= 0.0:
+                timestamp = frame_counter / cam.fps
+            # ============================================================
+
             face_box = detector.detect_largest_face(frame)
 
             if face_box:
                 multi_rois = detector.get_multi_rois(face_box)
-                processor.extract_and_buffer_multi(frame, multi_rois)
+                processor.extract_and_buffer_multi(frame, multi_rois, timestamp)
                 
                 for region_name, box in multi_rois.items():
                     rx, ry, rw, rh = box
                     cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), (0, 255, 0), 2)
-                    break # ONLY THE FOREHEAD
 
                 fx, fy, fw, fh = face_box
 

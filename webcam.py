@@ -33,8 +33,8 @@ class WebcamStream:
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
         # Fallback in case OpenCV fails to read the metadata
         if self.fps == 0 or np.isnan(self.fps):
-            self.fps = 30.0 
-            logging.warning("Could not read FPS from source. Defaulting to 30.0 FPS.")
+            self.fps = 25.0 
+            logging.warning("Could not read FPS from source. Defaulting to 25.0 FPS.")
 
         logging.info(f"Video source initialized successfully. Operating at {self.fps} FPS.")
 
@@ -44,7 +44,7 @@ class WebcamStream:
             self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25) 
             self.cap.set(cv2.CAP_PROP_EXPOSURE, -5)
             self.cap.set(cv2.CAP_PROP_AUTO_WB, 0)
-            self.cap.set(cv2.CAP_PROP_FPS, 30)
+            self.cap.set(cv2.CAP_PROP_FPS, 25)
 
     def read_frame(self) -> Tuple[bool, Optional[np.ndarray]]:
         ret, frame = self.cap.read()
