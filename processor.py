@@ -27,7 +27,7 @@ class SignalProcessor:
     Handles the extraction, filtering, buffering, and frequency analysis of the rPPG signal.
     """
 
-    def __init__(self, buffer_seconds: int = 0.1, target_fps: float = 30.0):
+    def __init__(self, buffer_seconds: int = 10, target_fps: float = 30.0):
         """
         Initializes rolling buffers for the signal and timestamps.
         
@@ -75,7 +75,6 @@ class SignalProcessor:
             # Calculate mean and apply the specific weight for this region
             region_mean = float(np.mean(green_channel))
             weighted_sum += region_mean * weights[region_name]
-            break
 
         # Buffer the final weighted value
         self.raw_signal.append(weighted_sum)

@@ -79,7 +79,6 @@ def main():
                 for region_name, box in multi_rois.items():
                     rx, ry, rw, rh = box
                     cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), (0, 255, 0), 2)
-                    break
 
                 fx, fy, fw, fh = face_box
 
