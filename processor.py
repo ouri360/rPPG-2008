@@ -44,7 +44,7 @@ class SignalProcessor:
         self.raw_signal = deque(maxlen=self.max_length)
         self.timestamps = deque(maxlen=self.max_length)
 
-        # Buffer for smoothing BPM estimates over time (average over the last 5 seconds)
+        # Buffer for smoothing BPM estimates over time (average over the last 1 seconds)
         smoothing_frames = int(self.target_fps * 1)
         self.bpm_buffer = deque(maxlen=smoothing_frames) 
 
