@@ -28,7 +28,7 @@ class SignalProcessor:
     Handles the extraction, filtering, buffering, and frequency analysis of the rPPG signal.
     """
 
-    def __init__(self, buffer_seconds: int = 10, target_fps: float = 30.0):
+    def __init__(self, buffer_seconds: int = 30, target_fps: float = 30.0):
         """
         Initializes rolling buffers for the signal and timestamps.
         
@@ -118,7 +118,7 @@ class SignalProcessor:
         g_uni = np.interp(t_uniform, ts, g)
         b_uni = np.interp(t_uniform, ts, b)
         
-        # 2. Detrend and Normalize
+        # 2. Detrend and Normalize (Crucial for Poh 2010)
         r_norm = self.detrend_and_normalize(r_uni)
         g_norm = self.detrend_and_normalize(g_uni)
         b_norm = self.detrend_and_normalize(b_uni)
@@ -131,31 +131,59 @@ class SignalProcessor:
             import warnings
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                from sklearn.decomposition import FastICA
                 ica = FastICA(n_components=3, random_state=42)
                 S = ica.fit_transform(X) 
         except ValueError:
             return None, None
             
-        # 5. Filter all components and find the Heartbeat
+        # ==========================================
+        # POH 2010 EXACT IMPLEMENTATION: Spectral Peak Selection
+        # Instead of variance, we find the component with the sharpest 
+        # periodic frequency peak in the human heart rate band.
+        # ==========================================
         lowcut = LOWCUT_HZ
         highcut = HIGHCUT_HZ
         sos = butter(ORDER, [lowcut, highcut], btype='bandpass', fs=self.target_fps, output='sos')
         
         best_component = None
-        max_variance = -1
+        max_snr = -1
         all_filtered_components = []
         
+        n_fft = NFFT
+        frequencies = np.fft.rfftfreq(n_fft, d=1.0/self.target_fps)
+        
+        # Only look for peaks within the human heart rate band
+        valid_idx = np.where((frequencies >= LOWCUT_HZ) & (frequencies <= HIGHCUT_HZ))[0]
+        
         for i in range(3):
+            # 1. Apply the bandpass filter
             filtered_comp = sosfiltfilt(sos, S[:, i])
             all_filtered_components.append(filtered_comp)
             
-            variance = np.var(filtered_comp)
-            if variance > max_variance:
-                max_variance = variance
+            # 2. Run FFT to analyze the frequency purity
+            window = np.hanning(len(filtered_comp))
+            power_spectrum = np.abs(np.fft.rfft(filtered_comp * window, n=n_fft))**2
+            
+            passband_power = power_spectrum[valid_idx]
+            
+            # 3. Find the exact index of the tallest peak
+            peak_idx = np.argmax(passband_power)
+            
+            # 4. Calculate SNR (Signal vs Background Noise)
+            # We sum the peak and its immediate neighbors to capture the full heartbeat energy
+            peak_region = passband_power[max(0, peak_idx-1) : min(len(passband_power), peak_idx+2)]
+            peak_power = np.sum(peak_region)
+            
+            total_power = np.sum(passband_power)
+            background_power = total_power - peak_power
+            
+            snr = peak_power / (background_power + 1e-8)
+            
+            # 5. Select the component with the highest SNR (the cleanest wave)
+            if snr > max_snr:
+                max_snr = snr
                 best_component = filtered_comp
                 
-        # Return the best one AND the list of all three for the dashboard!
         return best_component, all_filtered_components
     
     def estimate_heart_rate(self) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[list]]:
