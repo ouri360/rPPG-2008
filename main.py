@@ -1,8 +1,8 @@
 """
 Main application for rPPG signal extraction.
 ---------------------------------------
-Integrates webcam streaming, face detection, and signal processing.
-Displays a 4-panel live plot showing Time and Frequency domains before and after filtering.
+Integrates webcam streaming, ML face meshing, and signal processing.
+Displays a 3-panel live plot showing Time and Frequency domains.
 """
 
 import cv2
@@ -20,13 +20,12 @@ def main():
 
     if DEBUG_MODE:
         plt.ion()
-        # Reduced to 3 subplots
         fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 10))
         fig.tight_layout(pad=4.0)
 
         # 1. Raw Time Signal
         line1, = ax1.plot([], [], 'g-')
-        ax1.set_title("1. Raw Signal (Time Domain)")
+        ax1.set_title("1. Raw Signal (Trimmed Mean Skin)")
         ax1.set_ylabel("Amplitude")
 
         # 2. Filtered Time Signal
@@ -40,100 +39,94 @@ def main():
         ax3.set_xlabel("Frequency (Hz)")
         ax3.set_ylabel("Power")
 
-    VIDEO_SOURCE = "dataset/subject1.mp4" # Or set to "dataset/subject1.mp4"
-    GT_FILE = "dataset/gt_subject1.txt"
-    # Initialize the Ground Truth Reader
+    # Make sure this points to the right video and GT file!
+    VIDEO_SOURCE = "dataset/subject1.mp4" 
+    GT_FILE = "dataset/gt_subject1.txt" 
+    
     gt_reader = GroundTruthReader(GT_FILE)
+    
+    # 30-second buffer for maximum frequency resolution!
+    processor = SignalProcessor(buffer_seconds=30, target_fps=30.0)
 
     with WebcamStream(source=VIDEO_SOURCE) as cam:
-        
-        processor = SignalProcessor(buffer_seconds=30, target_fps=cam.fps)
-        logging.info("Démarrage de la boucle de traitement rPPG Multi-ROI...")
-        
         frame_counter = 0
 
         while True:
             success, frame = cam.read_frame()
-
             if not success: 
                 break
 
             frame_counter += 1
-
-            # ==================================================
-            # Completely prevents "Clock Beating" and 1Hz interpolation harmonics
-            # ==================================================
+            
+            # 100% Synthetic Flawless Timeline
             timestamp = frame_counter / cam.fps
 
-            face_box = detector.detect_largest_face(frame)
+            # ==================================================
+            # 1. ML FACE MESHING & SIGNAL EXTRACTION
+            # ==================================================
+            rois = detector.get_face_mesh_rois(frame)
 
-            if face_box:
-                multi_rois = detector.get_multi_rois(face_box)
-                processor.extract_and_buffer_multi(frame, multi_rois, timestamp)
+            if rois:
+                # Send the polygons to the pixel sorter
+                processor.extract_and_buffer_multi(frame, rois, timestamp)
                 
-                for region_name, box in multi_rois.items():
-                    rx, ry, rw, rh = box
-                    cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), (0, 255, 0), 2)
+                # Draw the dynamic ML polygons on the live feed
+                for name, polygon in rois.items():
+                    cv2.polylines(frame, [polygon], isClosed=True, color=(0, 255, 0), thickness=2)
 
-                fx, fy, fw, fh = face_box
+            # ==================================================
+            # 2. HEADS UP DISPLAY (Static Screen Coordinates)
+            # ==================================================
+            # Draw FPS at the very top
+            fps = processor.get_current_fps()
+            cv2.putText(frame, f"FPS: {fps:.1f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-                # === NEW: Real FPS display on the OpenCV window ===
-                current_fps = processor.get_current_fps()
-                fps_text = f"FPS: {current_fps:.1f}"
-                cv2.putText(frame, fps_text, (fx, fy - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                # ==================================================    
+            # Calculate and Draw Estimated BPM (Red)
+            bpm, freqs, filt_mag = processor.estimate_heart_rate()
+            if bpm is not None:
+                cv2.putText(frame, f"Est BPM: {bpm:.1f}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            else:
+                cv2.putText(frame, "Calc BPM...", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
-                # Unpack the 4 variables from the new method
-                bpm, freqs, filt_mag = processor.estimate_heart_rate()
-                
+            # Extract and Draw Ground Truth (Green)
+            gt_hr = gt_reader.get_hr_at_time(timestamp)
+            if gt_hr is not None:
+                cv2.putText(frame, f"True HR: {gt_hr:.1f}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
+
+            # ==================================================
+            # 3. MATPLOTLIB DASHBOARD
+            # ==================================================
+            if DEBUG_MODE and (frame_counter % 3 == 0):
+                signal_data = list(processor.raw_signal)
+                filtered_data = processor.get_filtered_signal()
+
+                if len(signal_data) > 10:
+                    line1.set_xdata(range(len(signal_data)))
+                    line1.set_ydata(signal_data)
+                    ax1.relim()
+                    ax1.autoscale_view()
+
+                if filtered_data is not None:
+                    line2.set_xdata(range(len(filtered_data)))
+                    line2.set_ydata(filtered_data)
+                    ax2.relim()
+                    ax2.autoscale_view()
+
                 if bpm is not None:
-                    text = f"BPM: {bpm:.1f}"
-                    cv2.putText(frame, text, (fx, fy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-                else:
-                    cv2.putText(frame, "Calcul BPM...", (fx, fy - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                    line3.set_xdata(freqs)
+                    line3.set_ydata(filt_mag)
+                    ax3.relim()
+                    ax3.autoscale_view()
 
-                # ==================================================
-                # Compare with UBFC Ground Truth
-                # ==================================================
-                gt_hr = gt_reader.get_hr_at_time(timestamp)
-                if gt_hr is not None:
-                    # Draw the Ground truth in Green, slightly below the bounding box
-                    gt_text = f"True HR: {gt_hr:.1f}"
-                    cv2.putText(frame, gt_text, (fx, fy + fh + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                # ==================================================
-
-                # GUI Downsampling (Draw every 3 frames)
-                if DEBUG_MODE and (frame_counter % 3 == 0):
-                    signal_data = list(processor.raw_signal)
-                    filtered_data = processor.get_filtered_signal()
-
-                    if len(signal_data) > 10:
-                        line1.set_xdata(range(len(signal_data)))
-                        line1.set_ydata(signal_data)
-                        ax1.relim()
-                        ax1.autoscale_view()
-
-                    if filtered_data is not None:
-                        line2.set_xdata(range(len(filtered_data)))
-                        line2.set_ydata(filtered_data)
-                        ax2.relim()
-                        ax2.autoscale_view()
-
-                    # 2. Update the single FFT graph
-                    if bpm is not None:
-                        line3.set_xdata(freqs)
-                        line3.set_ydata(filt_mag)
-                        ax3.relim()
-                        ax3.autoscale_view()
-
-                    fig.canvas.draw()
-                    fig.canvas.flush_events()
+                fig.canvas.draw()
+                fig.canvas.flush_events()
 
             cv2.imshow("rPPG - Live Feed", frame)
 
             delay = int(1000 / cam.fps) if isinstance(VIDEO_SOURCE, str) else 1
             if cv2.waitKey(delay) & 0xFF == ord('q'):
-                logging.info("Fermeture demandée par l'utilisateur.")
+                logging.info("User requested shutdown.")
                 break
                 
     if DEBUG_MODE:

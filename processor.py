@@ -13,6 +13,7 @@ import logging
 from collections import deque
 from typing import Tuple, Optional
 from scipy.signal import butter, sosfiltfilt, detrend
+import cv2
 
 # Minimum number of seconds required to perform filtering and FFT analysis
 MINIMUM_AMOUNT_OF_DATA = 3 
@@ -53,10 +54,6 @@ class SignalProcessor:
         logging.info(f"SignalProcessor initialized with a {buffer_seconds}-second buffer.")
 
     def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict, timestamp: float) -> float:
-        """
-        Calculates a weighted spatial average from multiple ROIs.
-        """
-        # Define the weights (must sum to 1.0)
         weights = {
             'forehead': 0.60,
             'left_cheek': 0.20,
@@ -65,18 +62,42 @@ class SignalProcessor:
         
         weighted_sum = 0.0
         
-        for region_name, box in rois.items():
-            x, y, w, h = box
+        # Extract the green channel for the whole frame once (faster computation)
+        green_channel = frame[:, :, 1]
+        
+        for region_name, polygon in rois.items():
+            # 1. Create a blank black canvas
+            mask = np.zeros(frame.shape[:2], dtype=np.uint8)
             
-            # Extract ROI and isolate Green channel
-            cropped_roi = frame[y:y+h, x:x+w]
-            green_channel = cropped_roi[:, :, 1]
+            # 2. Draw the dynamic shape-shifting polygon in solid white
+            cv2.fillPoly(mask, [polygon], 255)
             
-            # Calculate mean and apply the specific weight for this region
-            region_mean = float(np.mean(green_channel))
-            weighted_sum += region_mean * weights[region_name]
+            # 3. Extract ONLY the green pixels that fall inside the white polygon
+            skin_pixels = green_channel[mask == 255]
+            
+            if len(skin_pixels) == 0:
+                continue
+                
+            # ==========================================
+            # DSP UPGRADE: Pixel Sorting (Trimmed Mean)
+            # Destroys Specular Glare and Shadows before they enter the buffer!
+            # ==========================================
+            sorted_pixels = np.sort(skin_pixels)
+            
+            # Calculate the boundary for the top and bottom 5%
+            trim_count = int(len(sorted_pixels) * 0.05)
+            
+            if trim_count > 0:
+                pure_skin = sorted_pixels[trim_count:-trim_count]
+            else:
+                pure_skin = sorted_pixels
+                
+            # Take the average of only the pristine, matte skin
+            region_val = float(np.mean(pure_skin))
+            # ==========================================
+            
+            weighted_sum += region_val * weights[region_name]
 
-        # Buffer the final weighted value
         self.raw_signal.append(weighted_sum)
         self.timestamps.append(timestamp)
 
