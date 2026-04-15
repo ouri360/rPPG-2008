@@ -47,7 +47,7 @@ def main():
 
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         
-        processor = SignalProcessor(buffer_seconds=10, target_fps=cam.fps)
+        processor = SignalProcessor(buffer_seconds=30, target_fps=cam.fps)
         logging.info("Démarrage de la boucle de traitement rPPG Multi-ROI...")
         
         frame_counter = 0

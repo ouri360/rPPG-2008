@@ -13,7 +13,6 @@ import logging
 from collections import deque
 from typing import Tuple, Optional
 from scipy.signal import butter, sosfiltfilt, detrend
-from scipy import signal
 
 # Minimum number of seconds required to perform filtering and FFT analysis
 MINIMUM_AMOUNT_OF_DATA = 3 
@@ -28,7 +27,7 @@ class SignalProcessor:
     Handles the extraction, filtering, buffering, and frequency analysis of the rPPG signal.
     """
 
-    def __init__(self, buffer_seconds: int = 10, target_fps: float = 30.0):
+    def __init__(self, buffer_seconds: int = 30, target_fps: float = 30.0):
         """
         Initializes rolling buffers for the signal and timestamps.
         
