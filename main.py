@@ -44,14 +44,14 @@ def main():
         ax3.set_xlabel("Frequency (Hz)")
         ax3.set_ylabel("Power")
 
-    VIDEO_SOURCE = 0 # Or set to "dataset/subject1.mp4"
+    VIDEO_SOURCE = "dataset/subject1.mp4" # Or set to "dataset/subject1.mp4"
     GT_FILE = "dataset/gt_subject1.txt"
     # Initialize the Ground Truth Reader
     gt_reader = GroundTruthReader(GT_FILE)
 
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         
-        processor = SignalProcessor(buffer_seconds=10, target_fps=cam.fps)
+        processor = SignalProcessor(buffer_seconds=30, target_fps=cam.fps)
         logging.info("Démarrage de la boucle de traitement rPPG Multi-ROI...")
         
         frame_counter = 0
