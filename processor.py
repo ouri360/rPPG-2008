@@ -16,11 +16,11 @@ from scipy.signal import butter, sosfiltfilt, detrend
 import cv2
 
 # Minimum number of seconds required to perform filtering and FFT analysis
-MINIMUM_AMOUNT_OF_DATA = 3 
+MINIMUM_AMOUNT_OF_DATA = 4 
 # Filter parameters for bandpass filter (these can be tuned based on expected heart rate range)
-LOWCUT_HZ = 0.9         # Corresponds to ~54 BPM
-HIGHCUT_HZ = 2          # Corresponds to ~120 BPM
-ORDER = 4               # Filter order
+LOWCUT_HZ = 0.7         # Corresponds to ~42 BPM
+HIGHCUT_HZ = 3.0          # Corresponds to ~180 BPM
+ORDER = 2               # Filter order (x2 with sosfiltfilt for zero phase distortion)
 NFFT = 8192             # Number of points for FFT (zero-padding for better frequency resolution)
 
 class SignalProcessor:
