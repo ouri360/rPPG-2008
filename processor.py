@@ -12,7 +12,8 @@ import numpy as np
 import logging
 from collections import deque
 from typing import Tuple, Optional
-from scipy.signal import butter, sosfiltfilt, detrend, medfilt
+from scipy.signal import butter, sosfiltfilt, detrend
+from scipy import signal
 
 # Minimum number of seconds required to perform filtering and FFT analysis
 MINIMUM_AMOUNT_OF_DATA = 3 
@@ -92,8 +93,8 @@ class SignalProcessor:
         if len(self.raw_signal) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None
 
-        signal = np.array(self.raw_signal)
-        ts = np.array(self.timestamps)
+        signal = np.array(list(self.raw_signal))
+        ts = np.array(list(self.timestamps))
         
         if len(ts) < 2:
             return None
@@ -103,70 +104,47 @@ class SignalProcessor:
         t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
         signal_uniform = np.interp(t_uniform, ts, signal)
         
-        # 2. Detrend the newly uniform signal
-        signal_uniform = detrend(signal_uniform)
+        # 2. Prevent Filter Ringing! 
+        # Smooth out vertical cliffs into gentle slopes
+        signal_uniform = self.remove_impulse_noise(signal_uniform)
         
-        # ==========================================
-        # THE TRUE FIX: Z-Score Artifact Clamping
-        # Clamps massive movement spikes without distorting the pulse wave
-        # ==========================================
-        std_val = np.std(signal_uniform)
-        if std_val > 0:
-            # 3.0 Standard Deviations leaves the heartbeat untouched, but kills blinks.
-            signal_uniform = np.clip(signal_uniform, -3.0 * std_val, 3.0 * std_val)
-        # ==========================================
+        # 3. Apply your Dynamic Range Compressor
+        signal_uniform = self.detrend_and_normalize(signal_uniform)
 
         lowcut = LOWCUT_HZ
         highcut = HIGHCUT_HZ
         order = ORDER
         
-        # 3. Apply the High-Precision Butterworth
+        # 4. Apply the High-Precision Butterworth
         sos = butter(order, [lowcut, highcut], btype='bandpass', fs=self.target_fps, output='sos')
         filtered_signal = sosfiltfilt(sos, signal_uniform)
         
         return filtered_signal
     
-    def estimate_heart_rate(self) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
+    def estimate_heart_rate(self) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
         if len(self.raw_signal) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
-            return None, None, None, None
-
-        # 1. Resample and detrend the raw signal
-        ts = np.array(self.timestamps)
-        dt = 1.0 / self.target_fps
-        t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
-        raw_uniform = np.interp(t_uniform, ts, np.array(self.raw_signal))
-        raw_detrended_signal = detrend(raw_uniform)
-
-        # Apply the exact same Median Filter here so the Raw FFT graph matches reality
-        kernel_size = int(self.target_fps * 0.25)
-        kernel_size = kernel_size if kernel_size % 2 != 0 else kernel_size + 1
-        raw_detrended_signal = medfilt(raw_detrended_signal, kernel_size)
+            return None, None, None
 
         filtered_signal = self.get_filtered_signal()
         
         if filtered_signal is None:
-            return None, None, None, None
+            return None, None, None
             
         n_fft = NFFT
         
-        # 2. Apply the Hanning Window
+        # Apply the Hanning Window only to the filtered signal
         window = np.hanning(len(filtered_signal))
-        windowed_raw = raw_detrended_signal * window
         windowed_filt = filtered_signal * window
         
-        # 3. Compute the Power Spectra
-        fft_raw_complex = np.fft.rfft(windowed_raw, n=n_fft)
-        raw_power = (np.abs(fft_raw_complex)**2) 
-        
+        # Compute the Power Spectra
         fft_filtered_complex = np.fft.rfft(windowed_filt, n=n_fft)
         filtered_power = (np.abs(fft_filtered_complex)**2)
         
         frequencies = np.fft.rfftfreq(n_fft, d=1.0/self.target_fps)
 
-        # Dashbaord arrays
+        # Dashboard arrays
         plot_indices = np.where((frequencies >= 0.0) & (frequencies <= 3.0))[0]
         plot_freqs = frequencies[plot_indices]
-        plot_raw_mag = raw_power[plot_indices]
         plot_filt_mag = filtered_power[plot_indices]
         
         # BPM Arrays
@@ -174,7 +152,7 @@ class SignalProcessor:
         bpm_freqs = frequencies[bpm_indices]
         bpm_filt_mag = filtered_power[bpm_indices]
         
-        # 4. Find the Peak
+        # Find the Peak
         peak_index = np.argmax(bpm_filt_mag)
         dominant_freq = bpm_freqs[peak_index]
         
@@ -191,7 +169,8 @@ class SignalProcessor:
         self.bpm_buffer.append(raw_bpm)
         smoothed_bpm = sum(self.bpm_buffer) / len(self.bpm_buffer)
         
-        return smoothed_bpm, plot_freqs, plot_raw_mag, plot_filt_mag
+        # Return only the Smoothed BPM, Frequencies, and Filtered Magnitude
+        return smoothed_bpm, plot_freqs, plot_filt_mag
     
     def get_current_fps(self) -> float:
         """Returns actual measured FPS from the last ~1 second of timestamps."""
@@ -208,3 +187,41 @@ class SignalProcessor:
             return self.target_fps # Fallback to the target FPS safely
             
         return 1.0 / mean_diff
+    
+    @staticmethod
+    def detrend_and_normalize(x: np.ndarray) -> np.ndarray:
+        """Removes linear trend and standardizes variance to act as a dynamic range compressor."""
+        x = np.array(x, dtype=np.float64)
+        x = detrend(x)
+        
+        std = np.std(x)
+        if std == 0:
+            return x
+            
+        return (x - np.mean(x)) / (std + 1e-8)
+    
+    @staticmethod
+    def remove_impulse_noise(x: np.ndarray) -> np.ndarray:
+        """
+        Uses Velocity Clamping (Derivative Limiting) to turn sharp, 
+        instantaneous camera glitches into gentle slopes, preventing filter ringing.
+        """
+        if len(x) < 2:
+            return x
+        
+        # 1. Calculate the frame-to-frame velocity
+        diffs = np.diff(x)
+        
+        # 2. Find the normal maximum speed of the heartbeat
+        std_diff = np.std(diffs)
+        
+        if std_diff > 0:
+            # 3. Clamp the velocity. 3.0 std allows strong heartbeats to pass, 
+            # but completely stops instantaneous vertical glitches.
+            clamped_diffs = np.clip(diffs, -3.0 * std_diff, 3.0 * std_diff)
+            
+            # 4. Reconstruct the signal by integrating the clamped velocity
+            reconstructed = np.concatenate(([x[0]], x[0] + np.cumsum(clamped_diffs)))
+            return reconstructed
+            
+        return x

@@ -20,8 +20,8 @@ def main():
 
     if DEBUG_MODE:
         plt.ion()
-        # Increased figsize to 12 tall to fit 4 graphs comfortably
-        fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(8, 12))
+        # Reduced to 3 subplots
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 10))
         fig.tight_layout(pad=4.0)
 
         # 1. Raw Time Signal
@@ -34,16 +34,11 @@ def main():
         ax2.set_title("2. Filtered Signal (Time Domain)")
         ax2.set_ylabel("Amplitude")
 
-        # 3. Raw FFT (Before Filter)
-        line3, = ax3.plot([], [], 'r-')
-        ax3.set_title("3. Raw FFT (Before Filter)")
+        # 3. Filtered FFT (After Filter)
+        line3, = ax3.plot([], [], 'm-') 
+        ax3.set_title("3. Filtered FFT (Power Spectrum)")
+        ax3.set_xlabel("Frequency (Hz)")
         ax3.set_ylabel("Power")
-
-        # 4. Filtered FFT (After Filter)
-        line4, = ax4.plot([], [], 'm-') # 'm-' is magenta line
-        ax4.set_title("4. Filtered FFT (After Filter)")
-        ax4.set_xlabel("Frequency (Hz)")
-        ax4.set_ylabel("Power")
 
     VIDEO_SOURCE = "dataset/subject1.mp4" # Or set to "dataset/subject1.mp4"
     GT_FILE = "dataset/gt_subject1.txt"
@@ -89,7 +84,7 @@ def main():
                 # ==================================================    
 
                 # Unpack the 4 variables from the new method
-                bpm, freqs, raw_mag, filt_mag = processor.estimate_heart_rate()
+                bpm, freqs, filt_mag = processor.estimate_heart_rate()
                 
                 if bpm is not None:
                     text = f"BPM: {bpm:.1f}"
@@ -109,7 +104,7 @@ def main():
 
                 # GUI Downsampling (Draw every 3 frames)
                 if DEBUG_MODE and (frame_counter % 3 == 0):
-                    signal_data, _ = processor.get_signal_data()
+                    signal_data = list(processor.raw_signal)
                     filtered_data = processor.get_filtered_signal()
 
                     if len(signal_data) > 10:
@@ -124,19 +119,12 @@ def main():
                         ax2.relim()
                         ax2.autoscale_view()
 
-                    # Update both FFT graphs
+                    # 2. Update the single FFT graph
                     if bpm is not None:
-                        # Raw FFT
                         line3.set_xdata(freqs)
-                        line3.set_ydata(raw_mag)
+                        line3.set_ydata(filt_mag)
                         ax3.relim()
                         ax3.autoscale_view()
-                        
-                        # Filtered FFT
-                        line4.set_xdata(freqs)
-                        line4.set_ydata(filt_mag)
-                        ax4.relim()
-                        ax4.autoscale_view()
 
                     fig.canvas.draw()
                     fig.canvas.flush_events()
