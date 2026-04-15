@@ -84,15 +84,17 @@ class SignalProcessor:
             # ==========================================
             sorted_pixels = np.sort(skin_pixels)
             
-            # Calculate the boundary for the top and bottom 5%
-            trim_count = int(len(sorted_pixels) * 0.05)
+            # Bottom 5% = Shadows, wrinkles, stray hair
+            bottom_trim = int(len(sorted_pixels) * 0.05)
             
-            if trim_count > 0:
-                pure_skin = sorted_pixels[trim_count:-trim_count]
+            # Top 20% = Aggressive Specular Glare removal
+            top_trim = int(len(sorted_pixels) * 0.20)
+            
+            if bottom_trim > 0 and top_trim > 0:
+                pure_skin = sorted_pixels[bottom_trim:-top_trim]
             else:
                 pure_skin = sorted_pixels
                 
-            # Take the average of only the pristine, matte skin
             region_val = float(np.mean(pure_skin))
             # ==========================================
             

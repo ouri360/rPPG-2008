@@ -28,12 +28,16 @@ class FaceDetector:
         # Strictly avoids hairlines, eyebrows, and smile lines.
         # ==========================================
         self.ROI_INDICES = {
-            # Forehead: A tight, small box strictly in the dead center
-            'forehead': [151, 108, 69, 105, 66, 107, 9, 336, 296, 334, 299, 337],
-            # Left Cheek: High malar bone directly under the eye
-            'left_cheek': [205, 50, 118, 119, 100, 121],
-            # Right Cheek: High malar bone directly under the eye
-            'right_cheek': [425, 280, 347, 348, 329, 350]
+            # Forehead: Slightly wider and lower.
+            # Top edge: 67, 10, 297. 
+            # Bottom edge: 299, 9, 69.
+            'forehead': [67, 10, 297, 299, 9, 69],
+            
+            # Left Cheek: Unchanged.
+            'left_cheek': [117, 118, 101, 36, 205, 50],
+            
+            # Right Cheek: Unchanged.
+            'right_cheek': [346, 347, 330, 266, 425, 280]
         }
         
         # Dictionary to store the historical (x, y) coordinates of every single point
