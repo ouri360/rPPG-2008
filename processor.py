@@ -13,7 +13,7 @@ import logging
 from collections import deque
 from typing import Tuple, Optional
 from scipy.signal import butter, sosfiltfilt, detrend
-from scipy import signal
+from sklearn.decomposition import FastICA
 
 # Minimum number of seconds required to perform filtering and FFT analysis
 MINIMUM_AMOUNT_OF_DATA = 3 
@@ -41,11 +41,15 @@ class SignalProcessor:
         self.max_length = int(buffer_seconds * target_fps)
         
         # deques automatically pop the oldest item when maxlen is reached
-        self.raw_signal = deque(maxlen=self.max_length)
+        # WE NOW NEED 3 BUFFERS FOR RGB!
+        self.raw_r = deque(maxlen=self.max_length)
+        self.raw_g = deque(maxlen=self.max_length)
+        self.raw_b = deque(maxlen=self.max_length)
+
         self.timestamps = deque(maxlen=self.max_length)
 
         # Buffer for smoothing BPM estimates over time (average over the last 5 seconds)
-        smoothing_frames = int(self.target_fps * 1)
+        smoothing_frames = int(self.target_fps * 5)
         self.bpm_buffer = deque(maxlen=smoothing_frames) 
 
         # Tracker for Outlier Rejection
@@ -53,7 +57,7 @@ class SignalProcessor:
         
         logging.info(f"SignalProcessor initialized with a {buffer_seconds}-second buffer.")
 
-    def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict, timestamp: float) -> float:
+    def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict, timestamp: float) -> None:
         """
         Calculates a weighted spatial average from multiple ROIs.
         """
@@ -64,24 +68,30 @@ class SignalProcessor:
             'right_cheek': 0.20
         }
         
-        weighted_sum = 0.0
+        sum_r, sum_g, sum_b = 0.0, 0.0, 0.0
         
         for region_name, box in rois.items():
             x, y, w, h = box
-            
-            # Extract ROI and isolate Green channel
+            if y+h > frame.shape[0] or x+w > frame.shape[1]:
+                continue
+
             cropped_roi = frame[y:y+h, x:x+w]
-            green_channel = cropped_roi[:, :, 1]
             
-            # Calculate mean and apply the specific weight for this region
-            region_mean = float(np.mean(green_channel))
-            weighted_sum += region_mean * weights[region_name]
+            # OpenCV is BGR (Blue=0, Green=1, Red=2)
+            b_mean = float(np.mean(cropped_roi[:, :, 0]))
+            g_mean = float(np.mean(cropped_roi[:, :, 1]))
+            r_mean = float(np.mean(cropped_roi[:, :, 2]))
+            
+            sum_b += b_mean * weights[region_name]
+            sum_g += g_mean * weights[region_name]
+            sum_r += r_mean * weights[region_name]
 
-        # Buffer the final weighted value
-        self.raw_signal.append(weighted_sum)
+        # Append to our 3 separate color buffers
+        self.raw_b.append(sum_b)
+        self.raw_g.append(sum_g)
+        self.raw_r.append(sum_r)
+        
         self.timestamps.append(timestamp)
-
-        return weighted_sum
 
     def get_signal_data(self) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -89,52 +99,80 @@ class SignalProcessor:
         """
         return np.array(self.raw_signal), np.array(self.timestamps)
     
-    def get_filtered_signal(self) -> Optional[np.ndarray]:
-        if len(self.raw_signal) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
-            return None
+    def get_ica_signal(self) -> Tuple[Optional[np.ndarray], Optional[list]]:
+        if len(self.raw_g) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
+            return None, None
 
-        signal = np.array(list(self.raw_signal))
         ts = np.array(list(self.timestamps))
+        r = np.array(list(self.raw_r))
+        g = np.array(list(self.raw_g))
+        b = np.array(list(self.raw_b))
         
-        if len(ts) < 2:
-            return None
+        if len(ts) < 2: return None, None
 
         # 1. Uniform Resampling
         dt = 1.0 / self.target_fps
         t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
-        signal_uniform = np.interp(t_uniform, ts, signal)
         
-        # 2. Prevent Filter Ringing! 
-        # Smooth out vertical cliffs into gentle slopes
-        signal_uniform = self.remove_impulse_noise(signal_uniform)
+        r_uni = np.interp(t_uniform, ts, r)
+        g_uni = np.interp(t_uniform, ts, g)
+        b_uni = np.interp(t_uniform, ts, b)
         
-        # 3. Apply your Dynamic Range Compressor
-        signal_uniform = self.detrend_and_normalize(signal_uniform)
-
+        # 2. Detrend and Normalize
+        r_norm = self.detrend_and_normalize(r_uni)
+        g_norm = self.detrend_and_normalize(g_uni)
+        b_norm = self.detrend_and_normalize(b_uni)
+        
+        # 3. Stack into a matrix
+        X = np.column_stack((r_norm, g_norm, b_norm))
+        
+        # 4. Apply FastICA
+        try:
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                from sklearn.decomposition import FastICA
+                ica = FastICA(n_components=3, random_state=42)
+                S = ica.fit_transform(X) 
+        except ValueError:
+            return None, None
+            
+        # 5. Filter all components and find the Heartbeat
         lowcut = LOWCUT_HZ
         highcut = HIGHCUT_HZ
-        order = ORDER
+        sos = butter(ORDER, [lowcut, highcut], btype='bandpass', fs=self.target_fps, output='sos')
         
-        # 4. Apply the High-Precision Butterworth
-        sos = butter(order, [lowcut, highcut], btype='bandpass', fs=self.target_fps, output='sos')
-        filtered_signal = sosfiltfilt(sos, signal_uniform)
+        best_component = None
+        max_variance = -1
+        all_filtered_components = []
         
-        return filtered_signal
+        for i in range(3):
+            filtered_comp = sosfiltfilt(sos, S[:, i])
+            all_filtered_components.append(filtered_comp)
+            
+            variance = np.var(filtered_comp)
+            if variance > max_variance:
+                max_variance = variance
+                best_component = filtered_comp
+                
+        # Return the best one AND the list of all three for the dashboard!
+        return best_component, all_filtered_components
     
-    def estimate_heart_rate(self) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
-        if len(self.raw_signal) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
-            return None, None, None
+    def estimate_heart_rate(self) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], Optional[list]]:
+        if len(self.raw_g) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
+            return None, None, None, None, None
 
-        filtered_signal = self.get_filtered_signal()
+        # Call our new ICA method
+        best_component, all_components = self.get_ica_signal()
         
-        if filtered_signal is None:
-            return None, None, None
+        if best_component is None:
+            return None, None, None, None, None
             
         n_fft = NFFT
         
-        # Apply the Hanning Window only to the filtered signal
-        window = np.hanning(len(filtered_signal))
-        windowed_filt = filtered_signal * window
+        # Apply the Hanning Window to the BEST component
+        window = np.hanning(len(best_component))
+        windowed_filt = best_component * window
         
         # Compute the Power Spectra
         fft_filtered_complex = np.fft.rfft(windowed_filt, n=n_fft)
@@ -142,21 +180,17 @@ class SignalProcessor:
         
         frequencies = np.fft.rfftfreq(n_fft, d=1.0/self.target_fps)
 
-        # Dashboard arrays
         plot_indices = np.where((frequencies >= 0.0) & (frequencies <= 3.0))[0]
         plot_freqs = frequencies[plot_indices]
         plot_filt_mag = filtered_power[plot_indices]
         
-        # BPM Arrays
         bpm_indices = np.where((frequencies >= LOWCUT_HZ) & (frequencies <= HIGHCUT_HZ))[0]
         bpm_freqs = frequencies[bpm_indices]
         bpm_filt_mag = filtered_power[bpm_indices]
         
-        # Find the Peak
         peak_index = np.argmax(bpm_filt_mag)
         dominant_freq = bpm_freqs[peak_index]
         
-        # Parabolic Sub-bin Interpolation
         if 0 < peak_index < len(bpm_filt_mag) - 1:
             y0, y1, y2 = bpm_filt_mag[peak_index-1 : peak_index+2]
             if (y0 - 2*y1 + y2) != 0: 
@@ -169,8 +203,8 @@ class SignalProcessor:
         self.bpm_buffer.append(raw_bpm)
         smoothed_bpm = sum(self.bpm_buffer) / len(self.bpm_buffer)
         
-        # Return only the Smoothed BPM, Frequencies, and Filtered Magnitude
-        return smoothed_bpm, plot_freqs, plot_filt_mag
+        # Notice we are now returning 5 items!
+        return smoothed_bpm, plot_freqs, plot_filt_mag, best_component, all_components
     
     def get_current_fps(self) -> float:
         """Returns actual measured FPS from the last ~1 second of timestamps."""

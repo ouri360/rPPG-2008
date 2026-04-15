@@ -20,23 +20,27 @@ def main():
 
     if DEBUG_MODE:
         plt.ion()
-        # Reduced to 3 subplots
         fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 10))
         fig.tight_layout(pad=4.0)
 
-        # 1. Raw Time Signal
-        line1, = ax1.plot([], [], 'g-')
-        ax1.set_title("1. Raw Signal (Time Domain)")
-        ax1.set_ylabel("Amplitude")
+        # 1. Raw RGB Time Signals
+        line_r, = ax1.plot([], [], 'r-', label='Red', alpha=0.7)
+        line_g, = ax1.plot([], [], 'g-', label='Green', alpha=0.7)
+        line_b, = ax1.plot([], [], 'b-', label='Blue', alpha=0.7)
+        ax1.set_title("1. Raw RGB Signals")
+        ax1.legend(loc='upper right')
 
-        # 2. Filtered Time Signal
-        line2, = ax2.plot([], [], 'b-')
-        ax2.set_title("2. Filtered Signal (Time Domain)")
-        ax2.set_ylabel("Amplitude")
+        # 2. ICA Components
+        line_c0, = ax2.plot([], [], 'c-', label='Comp 1', alpha=0.5)
+        line_c1, = ax2.plot([], [], 'm-', label='Comp 2', alpha=0.5)
+        line_c2, = ax2.plot([], [], 'y-', label='Comp 3', alpha=0.5)
+        line_best, = ax2.plot([], [], 'k-', label='Selected Heartbeat', linewidth=2)
+        ax2.set_title("2. Unmixed ICA Components")
+        ax2.legend(loc='upper right')
 
         # 3. Filtered FFT (After Filter)
-        line3, = ax3.plot([], [], 'm-') 
-        ax3.set_title("3. Filtered FFT (Power Spectrum)")
+        line_fft, = ax3.plot([], [], 'm-') 
+        ax3.set_title("3. Final FFT (Selected Component)")
         ax3.set_xlabel("Frequency (Hz)")
         ax3.set_ylabel("Power")
 
@@ -83,8 +87,8 @@ def main():
                 cv2.putText(frame, fps_text, (fx, fy - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
                 # ==================================================    
 
-                # Unpack the 4 variables from the new method
-                bpm, freqs, filt_mag = processor.estimate_heart_rate()
+                # Unpack all 5 variables
+                bpm, freqs, filt_mag, best_comp, all_comps = processor.estimate_heart_rate()
                 
                 if bpm is not None:
                     text = f"BPM: {bpm:.1f}"
@@ -104,25 +108,36 @@ def main():
 
                 # GUI Downsampling (Draw every 3 frames)
                 if DEBUG_MODE and (frame_counter % 3 == 0):
-                    signal_data = list(processor.raw_signal)
-                    filtered_data = processor.get_filtered_signal()
+                    # Fetch raw RGB lists
+                    raw_r = list(processor.raw_r)
+                    raw_g = list(processor.raw_g)
+                    raw_b = list(processor.raw_b)
 
-                    if len(signal_data) > 10:
-                        line1.set_xdata(range(len(signal_data)))
-                        line1.set_ydata(signal_data)
+                    # Update Graph 1: RGB
+                    if len(raw_g) > 10:
+                        x_data = range(len(raw_g))
+                        line_r.set_data(x_data, raw_r)
+                        line_g.set_data(x_data, raw_g)
+                        line_b.set_data(x_data, raw_b)
                         ax1.relim()
                         ax1.autoscale_view()
 
-                    if filtered_data is not None:
-                        line2.set_xdata(range(len(filtered_data)))
-                        line2.set_ydata(filtered_data)
+                    # Update Graph 2 & 3: ICA and FFT
+                    if best_comp is not None:
+                        x_data_comp = range(len(best_comp))
+                        
+                        # Plot the 3 background components
+                        line_c0.set_data(x_data_comp, all_comps[0])
+                        line_c1.set_data(x_data_comp, all_comps[1])
+                        line_c2.set_data(x_data_comp, all_comps[2])
+                        
+                        # Plot the selected heartbeat thick and black over top
+                        line_best.set_data(x_data_comp, best_comp)
                         ax2.relim()
                         ax2.autoscale_view()
 
-                    # 2. Update the single FFT graph
-                    if bpm is not None:
-                        line3.set_xdata(freqs)
-                        line3.set_ydata(filt_mag)
+                        # Update the FFT graph
+                        line_fft.set_data(freqs, filt_mag)
                         ax3.relim()
                         ax3.autoscale_view()
 
