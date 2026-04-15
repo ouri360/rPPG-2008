@@ -40,7 +40,7 @@ def main():
         ax3.set_ylabel("Power")
 
     # Make sure this points to the right video and GT file!
-    VIDEO_SOURCE = 0 
+    VIDEO_SOURCE = "dataset/subject1.mp4" 
     GT_FILE = "dataset/gt_subject1.txt" 
     
     gt_reader = GroundTruthReader(GT_FILE)
