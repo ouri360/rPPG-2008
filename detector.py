@@ -40,19 +40,11 @@ class FaceDetector:
             'right_cheek': [346, 347, 330, 266, 425, 280]
         }
         
-        # Dictionary to store the historical (x, y) coordinates of every single point
-        self.smoothed_landmarks = {}
-        
-        # Smoothing Factor: 0.15 is very strong. 
-        # It crushes 1-pixel vibrations but still allows head movement.
-        self.alpha = 0.15 
-        
         logging.info("FaceDetector initialized with Jitter-Free ML Face Mesh.")
 
     def get_face_mesh_rois(self, frame: np.ndarray) -> Optional[Dict[str, np.ndarray]]:
         """
-        Calculates the exact (X, Y) pixel coordinates for the 3 dynamic skin polygons.
-        Applies EMA smoothing to the points to eliminate AI micro-jitter.
+        Calculates the exact (X, Y) pixel coordinates for skin polygons.
         """
         # MediaPipe requires RGB images
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -71,29 +63,12 @@ class FaceDetector:
             for idx in indices:
                 pt = landmarks.landmark[idx]
                 
-                # Raw AI coordinates
+                # Use raw, unadulterated AI coordinates!
                 raw_x = pt.x * w
                 raw_y = pt.y * h
                 
-                # ==========================================
-                # DSP UPGRADE: Landmark Smoothing
-                # Freeze the individual points in space using EMA
-                # ==========================================
-                if idx not in self.smoothed_landmarks:
-                    # First frame: just store the raw points
-                    self.smoothed_landmarks[idx] = (raw_x, raw_y)
-                else:
-                    # Subsequent frames: Blend the new point with the history
-                    prev_x, prev_y = self.smoothed_landmarks[idx]
-                    
-                    smooth_x = self.alpha * raw_x + (1 - self.alpha) * prev_x
-                    smooth_y = self.alpha * raw_y + (1 - self.alpha) * prev_y
-                    
-                    self.smoothed_landmarks[idx] = (smooth_x, smooth_y)
-                
-                # Retrieve the mathematically smoothed coordinates
-                final_x, final_y = self.smoothed_landmarks[idx]
-                points.append([int(final_x), int(final_y)])
+                # Append directly to the polygon without EMA/History smoothing
+                points.append([int(raw_x), int(raw_y)])
                 
             # Convert to a formatted NumPy array
             points_arr = np.array(points, dtype=np.int32)

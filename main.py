@@ -46,7 +46,7 @@ def main():
     gt_reader = GroundTruthReader(GT_FILE)
     
     # 30-second buffer for maximum frequency resolution!
-    processor = SignalProcessor(buffer_seconds=30, target_fps=30.0)
+    processor = SignalProcessor(buffer_seconds=15, target_fps=30.0)
 
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         frame_counter = 0

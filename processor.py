@@ -10,13 +10,13 @@ import numpy as np
 import logging
 from collections import deque
 from typing import Tuple, Optional
-from scipy.signal import butter, sosfiltfilt
+from scipy.signal import butter, detrend, sosfiltfilt
 import cv2
 
 MINIMUM_AMOUNT_OF_DATA = 4 
 LOWCUT_HZ = 0.7         # Lowered to 42 BPM to safely capture resting heart rates
 HIGHCUT_HZ = 3.0        # Raised to 180 BPM to capture elevated heart rates
-ORDER = 6               # Standardized order for steep frequency cutoffs
+ORDER = 3               # Standardized order for steep frequency cutoffs
 NFFT = 8192             
 
 class SignalProcessor:
@@ -41,7 +41,7 @@ class SignalProcessor:
         self.bpm_buffer = deque(maxlen=smoothing_frames) 
         self.last_valid_bpm = None
         
-        logging.info(f"SignalProcessor upgraded to POS RGB Architecture.")
+        logging.info("SignalProcessor upgraded to POS RGB Architecture.")
 
     def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict, timestamp: float) -> float:
         weights = {
@@ -69,7 +69,7 @@ class SignalProcessor:
                 continue
                 
             # ==========================================
-            # DSP UPGRADE: Synchronized 3-Channel Sorting
+            # Synchronized 3-Channel Sorting
             # We use the Green channel's luminance to find the glare/shadows,
             # and apply those exact same drop indices to Red and Blue!
             # ==========================================
@@ -108,57 +108,46 @@ class SignalProcessor:
         if len(self.raw_g) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None
 
+        # ==========================================
+        # 1. No Interpolation. Pure discrete frames.
+        # ==========================================
         r = np.array(list(self.raw_r))
         g = np.array(list(self.raw_g))
         b = np.array(list(self.raw_b))
-        ts = np.array(list(self.timestamps))
         
-        if len(ts) < 2:
-            return None
-
-        dt = 1.0 / self.target_fps
-        t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
-        
-        r_u = np.interp(t_uniform, ts, r)
-        g_u = np.interp(t_uniform, ts, g)
-        b_u = np.interp(t_uniform, ts, b)
-        
-        C = np.vstack([r_u, g_u, b_u])
+        C = np.vstack([r, g, b])
         N = C.shape[1]
-        L = int(self.target_fps * 1.6) 
         
+        # Sliding window (1.6 seconds)
+        L = int(self.target_fps * 1.6) 
         H = np.zeros(N)
         
         # ==========================================
-        # DSP UPGRADE: Overlap-Add Envelope Flattening
-        # We must count exactly how many times each frame is overlapped
-        # to flatten the trapezoidal shape!
+        # 2. Strict POS Overlap-Add Loop
         # ==========================================
-        overlap_count = np.zeros(N)
-        
         for n in range(N - L + 1):
             C_window = C[:, n:n+L]
             
+            # Temporal Normalization
             mean_c = np.mean(C_window, axis=1, keepdims=True)
             Cn = C_window / (mean_c + 1e-8)
             
+            # Skin-Tone Projections
             S1 = Cn[1, :] - Cn[2, :]
             S2 = -2.0 * Cn[0, :] + Cn[1, :] + Cn[2, :]
             
+            # Alpha Tuning
             alpha = np.std(S1) / (np.std(S2) + 1e-8)
             
+            # Pulse Extraction
             h = S1 + alpha * S2
-            h_zero_mean = h - np.mean(h)
             
-            H[n:n+L] += h_zero_mean
-            overlap_count[n:n+L] += 1
+            # Overlap-Add (Zero-mean the segment, add to master array)
+            H[n:n+L] += (h - np.mean(h))
             
-        # 1. Flatten the mountain back into a flat line
-        H = H / (overlap_count + 1e-8)
-        
-        # 2. Standardize the dynamic range before it hits the Bandpass filter
-        H = (H - np.mean(H)) / (np.std(H) + 1e-8)
-        
+        # ==========================================
+        # 3. Direct Filtering (No Detrend, No Envelope Flattening)
+        # ==========================================
         sos = butter(ORDER, [LOWCUT_HZ, HIGHCUT_HZ], btype='bandpass', fs=self.target_fps, output='sos')
         filtered_signal = sosfiltfilt(sos, H)
         
@@ -172,37 +161,26 @@ class SignalProcessor:
         if filtered_signal is None:
             return None, None, None
             
-        # 1. Hanning Window to prevent Spectral Leakage at the edges
+        # 1. Hanning Window to squash the OLA envelope edges to zero naturally
         window = np.hanning(len(filtered_signal))
         windowed_filt = filtered_signal * window
         
-        # 2. High-Resolution FFT (Zero-padded to 8192 bins)
+        # 2. High-Resolution FFT
         fft_filtered_complex = np.fft.rfft(windowed_filt, n=NFFT)
         filtered_power = (np.abs(fft_filtered_complex)**2)
         
         frequencies = np.fft.rfftfreq(NFFT, d=1.0/self.target_fps)
 
-        # 3. Restrict Peak Detection strictly to the human physiological band
+        # 3. Restrict Peak Detection to physiological band
         bpm_indices = np.where((frequencies >= LOWCUT_HZ) & (frequencies <= HIGHCUT_HZ))[0]
         bpm_freqs = frequencies[bpm_indices]
         bpm_filt_mag = filtered_power[bpm_indices]
         
-        # 4. State-of-the-Art Peak Detection
+        # 4. Pure Argmax Peak Detection
         peak_index = np.argmax(bpm_filt_mag)
-        dominant_freq = bpm_freqs[peak_index]
+        raw_bpm = bpm_freqs[peak_index] * 60.0
         
-        # 5. Parabolic Interpolation for ultra-precision (fixes sub-bin errors)
-        if 0 < peak_index < len(bpm_filt_mag) - 1:
-            y0, y1, y2 = bpm_filt_mag[peak_index-1 : peak_index+2]
-            if (y0 - 2*y1 + y2) != 0: 
-                x = 0.5 * (y0 - y2) / (y0 - 2*y1 + y2)
-                df = bpm_freqs[1] - bpm_freqs[0]
-                dominant_freq += x * df
-
-        # The true mathematically calculated heart rate
-        raw_bpm = dominant_freq * 60.0
-        
-        # Plotting arrays (expanded to 4.0 Hz to show the noise floor being crushed)
+        # Plotting arrays
         plot_indices = np.where((frequencies >= 0.0) & (frequencies <= 4.0))[0]
         plot_freqs = frequencies[plot_indices]
         plot_filt_mag = filtered_power[plot_indices]
