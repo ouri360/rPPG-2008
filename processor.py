@@ -12,7 +12,7 @@ import numpy as np
 import logging
 from collections import deque
 from typing import Tuple, Optional
-from scipy.signal import butter, sosfiltfilt, detrend
+from scipy.signal import butter, sosfiltfilt, detrend, bessel
 import cv2
 
 # Minimum number of seconds required to perform filtering and FFT analysis
@@ -138,7 +138,7 @@ class SignalProcessor:
         order = ORDER
         
         # 4. Apply the High-Precision Butterworth
-        sos = butter(order, [lowcut, highcut], btype='bandpass', fs=self.target_fps, output='sos')
+        sos = bessel(order, [lowcut, highcut], btype='bandpass', fs=self.target_fps, output='sos')
         filtered_signal = sosfiltfilt(sos, signal_uniform)
         
         return filtered_signal
