@@ -16,11 +16,11 @@ from scipy.signal import butter, sosfiltfilt, detrend
 from sklearn.decomposition import FastICA
 
 # Minimum number of seconds required to perform filtering and FFT analysis
-MINIMUM_AMOUNT_OF_DATA = 3 
+MINIMUM_AMOUNT_OF_DATA = 4 
 # Filter parameters for bandpass filter (these can be tuned based on expected heart rate range)
-LOWCUT_HZ = 0.9         # Corresponds to ~54 BPM
-HIGHCUT_HZ = 2          # Corresponds to ~120 BPM
-ORDER = 4               # Filter order
+LOWCUT_HZ = 0.7         # Corresponds to ~42 BPM
+HIGHCUT_HZ = 3.0        # Corresponds to ~180 BPM
+ORDER = 3               # Filter order
 NFFT = 8192             # Number of points for FFT (zero-padding for better frequency resolution)
 
 class SignalProcessor:
@@ -49,7 +49,7 @@ class SignalProcessor:
         self.timestamps = deque(maxlen=self.max_length)
 
         # Buffer for smoothing BPM estimates over time (average over the last 5 seconds)
-        smoothing_frames = int(self.target_fps * 5)
+        smoothing_frames = int(self.target_fps * 1)
         self.bpm_buffer = deque(maxlen=smoothing_frames) 
 
         # Tracker for Outlier Rejection
