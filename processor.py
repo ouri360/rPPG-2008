@@ -17,7 +17,7 @@ import cv2
 MINIMUM_AMOUNT_OF_DATA = 4 
 LOWCUT_HZ = 0.7         # Lowered to 42 BPM to safely capture resting heart rates
 HIGHCUT_HZ = 3.0        # Raised to 180 BPM to capture elevated heart rates
-ORDER = 2               # Standardized order for steep frequency cutoffs
+ORDER = 6               # Standardized order for steep frequency cutoffs
 NFFT = 8192             
 
 class SignalProcessor:
