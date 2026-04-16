@@ -10,8 +10,7 @@ import numpy as np
 import logging
 from collections import deque
 from typing import Tuple, Optional
-from scipy.signal import butter, sosfiltfilt, detrend
-from scipy.ndimage import uniform_filter1d
+from scipy.signal import butter, sosfiltfilt
 import cv2
 
 MINIMUM_AMOUNT_OF_DATA = 4 
@@ -117,7 +116,6 @@ class SignalProcessor:
         if len(ts) < 2:
             return None
 
-        # 1. Uniform Resampling for all channels
         dt = 1.0 / self.target_fps
         t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
         
@@ -125,54 +123,44 @@ class SignalProcessor:
         g_u = np.interp(t_uniform, ts, g)
         b_u = np.interp(t_uniform, ts, b)
         
-        # ==========================================
-        # DSP UPGRADE 1: Pre-POS Anti-Movement Clamping
-        # We crush the physical movement spikes BEFORE they enter the POS math!
-        # ==========================================
-        r_u = self.remove_impulse_noise(r_u)
-        g_u = self.remove_impulse_noise(g_u)
-        b_u = self.remove_impulse_noise(b_u)
+        C = np.vstack([r_u, g_u, b_u])
+        N = C.shape[1]
+        L = int(self.target_fps * 1.6) 
+        
+        H = np.zeros(N)
         
         # ==========================================
-        # DSP UPGRADE 2: 2.0-Second POS Window
+        # DSP UPGRADE: Overlap-Add Envelope Flattening
+        # We must count exactly how many times each frame is overlapped
+        # to flatten the trapezoidal shape!
         # ==========================================
-        window_size = int(self.target_fps * 2.0)
+        overlap_count = np.zeros(N)
         
-        # 1. Rolling Temporal Normalization
-        r_mean = uniform_filter1d(r_u, size=window_size)
-        g_mean = uniform_filter1d(g_u, size=window_size)
-        b_mean = uniform_filter1d(b_u, size=window_size)
-        
-        r_n = r_u / (r_mean + 1e-8)
-        g_n = g_u / (g_mean + 1e-8)
-        b_n = b_u / (b_mean + 1e-8)
-
-        # 2. POS Orthogonal Projections
-        s1 = g_n - b_n
-        s2 = -2.0 * r_n + g_n + b_n
-
-        # 3. Dynamic Rolling Alpha
-        def rolling_std(x, w):
-            mean_x = uniform_filter1d(x, size=w)
-            mean_x2 = uniform_filter1d(x**2, size=w)
-            var = mean_x2 - mean_x**2
-            var = np.maximum(var, 0) # Prevent negative floating point roots
-            return np.sqrt(var)
+        for n in range(N - L + 1):
+            C_window = C[:, n:n+L]
             
-        std_s1 = rolling_std(s1, window_size)
-        std_s2 = rolling_std(s2, window_size)
+            mean_c = np.mean(C_window, axis=1, keepdims=True)
+            Cn = C_window / (mean_c + 1e-8)
+            
+            S1 = Cn[1, :] - Cn[2, :]
+            S2 = -2.0 * Cn[0, :] + Cn[1, :] + Cn[2, :]
+            
+            alpha = np.std(S1) / (np.std(S2) + 1e-8)
+            
+            h = S1 + alpha * S2
+            h_zero_mean = h - np.mean(h)
+            
+            H[n:n+L] += h_zero_mean
+            overlap_count[n:n+L] += 1
+            
+        # 1. Flatten the mountain back into a flat line
+        H = H / (overlap_count + 1e-8)
         
-        alpha = std_s1 / (std_s2 + 1e-8)
+        # 2. Standardize the dynamic range before it hits the Bandpass filter
+        H = (H - np.mean(H)) / (np.std(H) + 1e-8)
         
-        # 4. Final POS Pulse Wave
-        pos_signal = s1 + alpha * s2
-        
-        # Detrend and Normalize (Removes the gentle slope left by the clamp)
-        pos_signal = self.detrend_and_normalize(pos_signal)
-
-        # Apply High-Precision Butterworth Bandpass
         sos = butter(ORDER, [LOWCUT_HZ, HIGHCUT_HZ], btype='bandpass', fs=self.target_fps, output='sos')
-        filtered_signal = sosfiltfilt(sos, pos_signal)
+        filtered_signal = sosfiltfilt(sos, H)
         
         return filtered_signal
     
@@ -184,26 +172,26 @@ class SignalProcessor:
         if filtered_signal is None:
             return None, None, None
             
-        n_fft = NFFT
+        # 1. Hanning Window to prevent Spectral Leakage at the edges
         window = np.hanning(len(filtered_signal))
         windowed_filt = filtered_signal * window
         
-        fft_filtered_complex = np.fft.rfft(windowed_filt, n=n_fft)
+        # 2. High-Resolution FFT (Zero-padded to 8192 bins)
+        fft_filtered_complex = np.fft.rfft(windowed_filt, n=NFFT)
         filtered_power = (np.abs(fft_filtered_complex)**2)
         
-        frequencies = np.fft.rfftfreq(n_fft, d=1.0/self.target_fps)
+        frequencies = np.fft.rfftfreq(NFFT, d=1.0/self.target_fps)
 
-        plot_indices = np.where((frequencies >= 0.0) & (frequencies <= 3.0))[0]
-        plot_freqs = frequencies[plot_indices]
-        plot_filt_mag = filtered_power[plot_indices]
-        
+        # 3. Restrict Peak Detection strictly to the human physiological band
         bpm_indices = np.where((frequencies >= LOWCUT_HZ) & (frequencies <= HIGHCUT_HZ))[0]
         bpm_freqs = frequencies[bpm_indices]
         bpm_filt_mag = filtered_power[bpm_indices]
         
+        # 4. State-of-the-Art Peak Detection
         peak_index = np.argmax(bpm_filt_mag)
         dominant_freq = bpm_freqs[peak_index]
         
+        # 5. Parabolic Interpolation for ultra-precision (fixes sub-bin errors)
         if 0 < peak_index < len(bpm_filt_mag) - 1:
             y0, y1, y2 = bpm_filt_mag[peak_index-1 : peak_index+2]
             if (y0 - 2*y1 + y2) != 0: 
@@ -211,12 +199,15 @@ class SignalProcessor:
                 df = bpm_freqs[1] - bpm_freqs[0]
                 dominant_freq += x * df
 
+        # The true mathematically calculated heart rate
         raw_bpm = dominant_freq * 60.0
         
-        self.bpm_buffer.append(raw_bpm)
-        smoothed_bpm = sum(self.bpm_buffer) / len(self.bpm_buffer)
+        # Plotting arrays (expanded to 4.0 Hz to show the noise floor being crushed)
+        plot_indices = np.where((frequencies >= 0.0) & (frequencies <= 4.0))[0]
+        plot_freqs = frequencies[plot_indices]
+        plot_filt_mag = filtered_power[plot_indices]
         
-        return smoothed_bpm, plot_freqs, plot_filt_mag
+        return raw_bpm, plot_freqs, plot_filt_mag
     
     def get_current_fps(self) -> float:
         if len(self.timestamps) < 2:
@@ -229,46 +220,3 @@ class SignalProcessor:
             return self.target_fps 
         return 1.0 / mean_diff
     
-    def detrend_and_normalize(self, x: np.ndarray) -> np.ndarray:
-        x = np.array(x, dtype=np.float64)
-        
-        # Remove low-frequency baseline drift
-        window_size = int(self.target_fps * 1.5)
-        baseline = uniform_filter1d(x, size=window_size)
-        x = x - baseline
-        
-        std = np.std(x)
-        if std == 0:
-            return x
-        return (x - np.mean(x)) / (std + 1e-8)
-    
-    @staticmethod
-    def remove_impulse_noise(x: np.ndarray) -> np.ndarray:
-        """
-        Uses Robust Percentile Velocity Clamping to decapitate sudden movement spikes 
-        while perfectly preserving the gentle pixel speed of a normal human heartbeat.
-        """
-        if len(x) < 2:
-            return x
-            
-        diffs = np.diff(x)
-        abs_diffs = np.abs(diffs)
-        
-        # ==========================================
-        # DSP UPGRADE: The Percentile Shield
-        # 85% of the time, the subject is relatively still (only blood is pulsing).
-        # We find this normal speed and enforce it relentlessly.
-        # ==========================================
-        normal_speed = float(np.percentile(abs_diffs, 85))
-        
-        # Strict clamp: No pixel is allowed to change faster than 1.5x the normal heartbeat speed
-        max_velocity = normal_speed * 1.5
-        
-        # Epsilon fallback in case the subject is perfectly frozen like a statue
-        if max_velocity == 0:
-            max_velocity = 1e-5
-            
-        clamped_diffs = np.clip(diffs, -max_velocity, max_velocity)
-        reconstructed = np.concatenate(([x[0]], x[0] + np.cumsum(clamped_diffs)))
-        
-        return reconstructed
