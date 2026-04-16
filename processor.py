@@ -1,11 +1,9 @@
 """
-SignalProcessor Module for rPPG Signal Extraction
+SignalProcessor Module for rPPG Signal Extraction (POS Upgraded)
 ---------------------------------------
-This module handles the extraction, filtering, and buffering of the raw rPPG signal from video frames.
-It crops the detected face region, isolates the green channel, calculates the spatial average,
-and maintains a rolling buffer of the signal values and their corresponding timestamps for real-time processing.
-It also includes methods for applying a bandpass filter to the raw signal, 
-and estimating the heart rate using frequency analysis.
+This module handles the extraction, filtering, and buffering of the raw rPPG signal.
+It utilizes the state-of-the-art POS (Plane-Orthogonal-to-Skin) algorithm 
+to mathematically annihilate ambient lighting flicker and motion artifacts.
 """
 
 import numpy as np
@@ -13,45 +11,38 @@ import logging
 from collections import deque
 from typing import Tuple, Optional
 from scipy.signal import butter, sosfiltfilt, detrend
+from scipy.ndimage import uniform_filter1d
 import cv2
 
-# Minimum number of seconds required to perform filtering and FFT analysis
 MINIMUM_AMOUNT_OF_DATA = 4 
-# Filter parameters for bandpass filter (these can be tuned based on expected heart rate range)
-LOWCUT_HZ = 0.7         # Corresponds to ~42 BPM
-HIGHCUT_HZ = 3.0          # Corresponds to ~180 BPM
-ORDER = 2               # Filter order (x2 with sosfiltfilt for zero phase distortion)
-NFFT = 8192             # Number of points for FFT (zero-padding for better frequency resolution)
+LOWCUT_HZ = 0.7         # Lowered to 42 BPM to safely capture resting heart rates
+HIGHCUT_HZ = 3.0        # Raised to 180 BPM to capture elevated heart rates
+ORDER = 2               # Standardized order for steep frequency cutoffs
+NFFT = 8192             
 
 class SignalProcessor:
-    """
-    Handles the extraction, filtering, buffering, and frequency analysis of the rPPG signal.
-    """
-
     def __init__(self, buffer_seconds: int = 30, target_fps: float = 30.0):
-        """
-        Initializes rolling buffers for the signal and timestamps.
-        
-        Args:
-            buffer_seconds (int): How many seconds of data to hold in memory.
-            target_fps (int): Expected framerate of the camera.
-        """
         self.target_fps = target_fps
-        # Calculate maximum buffer size
         self.max_length = int(buffer_seconds * target_fps)
         
-        # deques automatically pop the oldest item when maxlen is reached
-        self.raw_signal = deque(maxlen=self.max_length)
+        # ==========================================
+        # DSP UPGRADE: 3-Channel Architecture
+        # POS requires independent tracking of Red, Green, and Blue.
+        # ==========================================
+        self.raw_r = deque(maxlen=self.max_length)
+        self.raw_g = deque(maxlen=self.max_length)
+        self.raw_b = deque(maxlen=self.max_length)
+        
+        # Alias for main.py Graph 1 backwards compatibility (shows Green channel)
+        self.raw_signal = self.raw_g 
+        
         self.timestamps = deque(maxlen=self.max_length)
 
-        # Buffer for smoothing BPM estimates over time (average over the last 1 seconds)
         smoothing_frames = int(self.target_fps * 1)
         self.bpm_buffer = deque(maxlen=smoothing_frames) 
-
-        # Tracker for Outlier Rejection
         self.last_valid_bpm = None
         
-        logging.info(f"SignalProcessor initialized with a {buffer_seconds}-second buffer.")
+        logging.info(f"SignalProcessor upgraded to POS RGB Architecture.")
 
     def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict, timestamp: float) -> float:
         weights = {
@@ -60,125 +51,157 @@ class SignalProcessor:
             'right_cheek': 0.20
         }
         
-        weighted_sum = 0.0
+        weighted_r = 0.0
+        weighted_g = 0.0
+        weighted_b = 0.0
         
-        # Extract the green channel for the whole frame once (faster computation)
-        green_channel = frame[:, :, 1]
+        # Extract all three color channels (OpenCV uses BGR order)
+        b_channel, g_channel, r_channel = cv2.split(frame)
         
         for region_name, polygon in rois.items():
-            # 1. Create a blank black canvas
             mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-            
-            # 2. Draw the dynamic shape-shifting polygon in solid white
             cv2.fillPoly(mask, [polygon], 255)
             
-            # 3. Extract ONLY the green pixels that fall inside the white polygon
-            skin_pixels = green_channel[mask == 255]
+            r_pixels = r_channel[mask == 255]
+            g_pixels = g_channel[mask == 255]
+            b_pixels = b_channel[mask == 255]
             
-            if len(skin_pixels) == 0:
+            if len(g_pixels) == 0:
                 continue
                 
             # ==========================================
-            # DSP UPGRADE: Pixel Sorting (Trimmed Mean)
-            # Destroys Specular Glare and Shadows before they enter the buffer!
+            # DSP UPGRADE: Synchronized 3-Channel Sorting
+            # We use the Green channel's luminance to find the glare/shadows,
+            # and apply those exact same drop indices to Red and Blue!
             # ==========================================
-            sorted_pixels = np.sort(skin_pixels)
+            sort_indices = np.argsort(g_pixels)
             
-            # Bottom 5% = Shadows, wrinkles, stray hair
-            bottom_trim = int(len(sorted_pixels) * 0.05)
-            
-            # Top 20% = Aggressive Specular Glare removal
-            top_trim = int(len(sorted_pixels) * 0.20)
+            bottom_trim = int(len(sort_indices) * 0.05)
+            top_trim = int(len(sort_indices) * 0.20)
             
             if bottom_trim > 0 and top_trim > 0:
-                pure_skin = sorted_pixels[bottom_trim:-top_trim]
+                valid_indices = sort_indices[bottom_trim:-top_trim]
             else:
-                pure_skin = sorted_pixels
+                valid_indices = sort_indices
                 
-            region_val = float(np.mean(pure_skin))
+            r_val = float(np.mean(r_pixels[valid_indices]))
+            g_val = float(np.mean(g_pixels[valid_indices]))
+            b_val = float(np.mean(b_pixels[valid_indices]))
             # ==========================================
             
-            weighted_sum += region_val * weights[region_name]
+            weighted_r += r_val * weights[region_name]
+            weighted_g += g_val * weights[region_name]
+            weighted_b += b_val * weights[region_name]
 
-        self.raw_signal.append(weighted_sum)
+        # Push to the RGB buffers
+        self.raw_r.append(weighted_r)
+        self.raw_g.append(weighted_g)
+        self.raw_b.append(weighted_b)
+        
         self.timestamps.append(timestamp)
 
-        return weighted_sum
+        return weighted_g
 
     def get_signal_data(self) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Retrieves the current buffers as NumPy arrays for filtering/FFT.
-        """
-        return np.array(self.raw_signal), np.array(self.timestamps)
+        return np.array(self.raw_g), np.array(self.timestamps)
     
     def get_filtered_signal(self) -> Optional[np.ndarray]:
-        if len(self.raw_signal) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
+        if len(self.raw_g) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None
 
-        signal = np.array(list(self.raw_signal))
+        r = np.array(list(self.raw_r))
+        g = np.array(list(self.raw_g))
+        b = np.array(list(self.raw_b))
         ts = np.array(list(self.timestamps))
         
         if len(ts) < 2:
             return None
 
-        # 1. Uniform Resampling
+        # 1. Uniform Resampling for all channels
         dt = 1.0 / self.target_fps
         t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
-        signal_uniform = np.interp(t_uniform, ts, signal)
         
-        # 2. Prevent Filter Ringing! 
-        # Smooth out vertical cliffs into gentle slopes
-        signal_uniform = self.remove_impulse_noise(signal_uniform)
+        r_u = np.interp(t_uniform, ts, r)
+        g_u = np.interp(t_uniform, ts, g)
+        b_u = np.interp(t_uniform, ts, b)
         
-        # 3. Apply your Dynamic Range Compressor
-        signal_uniform = self.detrend_and_normalize(signal_uniform)
+        # ==========================================
+        # DSP UPGRADE: Continuous Rolling POS Algorithm
+        # ==========================================
+        window_size = int(self.target_fps * 1.5)
+        
+        # 1. Rolling Temporal Normalization
+        # Normalizes each frame against its local 1.5s neighborhood, not the whole 30s!
+        r_mean = uniform_filter1d(r_u, size=window_size)
+        g_mean = uniform_filter1d(g_u, size=window_size)
+        b_mean = uniform_filter1d(b_u, size=window_size)
+        
+        r_n = r_u / (r_mean + 1e-8)
+        g_n = g_u / (g_mean + 1e-8)
+        b_n = b_u / (b_mean + 1e-8)
 
-        lowcut = LOWCUT_HZ
-        highcut = HIGHCUT_HZ
-        order = ORDER
+        # 2. POS Orthogonal Projections
+        s1 = g_n - b_n
+        s2 = -2.0 * r_n + g_n + b_n
+
+        # 3. Dynamic Rolling Alpha
+        # Calculates variance (E[X^2] - E[X]^2) locally so alpha adapts to every single heartbeat!
+        def rolling_std(x, w):
+            mean_x = uniform_filter1d(x, size=w)
+            mean_x2 = uniform_filter1d(x**2, size=w)
+            var = mean_x2 - mean_x**2
+            var = np.maximum(var, 0) # Prevent negative roots from floating point math
+            return np.sqrt(var)
+            
+        std_s1 = rolling_std(s1, window_size)
+        std_s2 = rolling_std(s2, window_size)
         
-        # 4. Apply the High-Precision Butterworth
-        sos = butter(order, [lowcut, highcut], btype='bandpass', fs=self.target_fps, output='sos')
-        filtered_signal = sosfiltfilt(sos, signal_uniform)
+        alpha = std_s1 / (std_s2 + 1e-8)
+        
+        # 4. Final POS Pulse Wave
+        pos_signal = s1 + alpha * s2
+        # ==========================================
+        
+        # Prevent Filter Ringing
+        pos_signal = self.remove_impulse_noise(pos_signal)
+        
+        # Detrend and Normalize
+        pos_signal = self.detrend_and_normalize(pos_signal)
+
+        # Apply High-Precision Butterworth Bandpass
+        sos = butter(ORDER, [LOWCUT_HZ, HIGHCUT_HZ], btype='bandpass', fs=self.target_fps, output='sos')
+        filtered_signal = sosfiltfilt(sos, pos_signal)
         
         return filtered_signal
     
     def estimate_heart_rate(self) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
-        if len(self.raw_signal) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
+        if len(self.raw_g) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None, None, None
 
         filtered_signal = self.get_filtered_signal()
-        
         if filtered_signal is None:
             return None, None, None
             
         n_fft = NFFT
-        
-        # Apply the Hanning Window only to the filtered signal
         window = np.hanning(len(filtered_signal))
         windowed_filt = filtered_signal * window
         
-        # Compute the Power Spectra
         fft_filtered_complex = np.fft.rfft(windowed_filt, n=n_fft)
         filtered_power = (np.abs(fft_filtered_complex)**2)
         
         frequencies = np.fft.rfftfreq(n_fft, d=1.0/self.target_fps)
 
-        # Dashboard arrays
         plot_indices = np.where((frequencies >= 0.0) & (frequencies <= 3.0))[0]
         plot_freqs = frequencies[plot_indices]
         plot_filt_mag = filtered_power[plot_indices]
         
-        # BPM Arrays
         bpm_indices = np.where((frequencies >= LOWCUT_HZ) & (frequencies <= HIGHCUT_HZ))[0]
         bpm_freqs = frequencies[bpm_indices]
         bpm_filt_mag = filtered_power[bpm_indices]
         
-        # Find the Peak
         peak_index = np.argmax(bpm_filt_mag)
         dominant_freq = bpm_freqs[peak_index]
         
-        # Parabolic Sub-bin Interpolation
         if 0 < peak_index < len(bpm_filt_mag) - 1:
             y0, y1, y2 = bpm_filt_mag[peak_index-1 : peak_index+2]
             if (y0 - 2*y1 + y2) != 0: 
@@ -191,59 +214,40 @@ class SignalProcessor:
         self.bpm_buffer.append(raw_bpm)
         smoothed_bpm = sum(self.bpm_buffer) / len(self.bpm_buffer)
         
-        # Return only the Smoothed BPM, Frequencies, and Filtered Magnitude
         return smoothed_bpm, plot_freqs, plot_filt_mag
     
     def get_current_fps(self) -> float:
-        """Returns actual measured FPS from the last ~1 second of timestamps."""
         if len(self.timestamps) < 2:
             return 0.0
-            
         recent_ts = np.array(self.timestamps)[-30:]
         if len(recent_ts) < 2:
             return 0.0
-            
-        # Protect against division by zero if timestamps ever get completely stuck
         mean_diff = float(np.mean(np.diff(recent_ts)))
         if mean_diff <= 0.0:
-            return self.target_fps # Fallback to the target FPS safely
-            
+            return self.target_fps 
         return 1.0 / mean_diff
     
-    @staticmethod
-    def detrend_and_normalize(x: np.ndarray) -> np.ndarray:
-        """Removes linear trend and standardizes variance to act as a dynamic range compressor."""
+    def detrend_and_normalize(self, x: np.ndarray) -> np.ndarray:
         x = np.array(x, dtype=np.float64)
-        x = detrend(x)
+        
+        # Remove low-frequency baseline drift
+        window_size = int(self.target_fps * 1.5)
+        baseline = uniform_filter1d(x, size=window_size)
+        x = x - baseline
         
         std = np.std(x)
         if std == 0:
             return x
-            
         return (x - np.mean(x)) / (std + 1e-8)
     
     @staticmethod
     def remove_impulse_noise(x: np.ndarray) -> np.ndarray:
-        """
-        Uses Velocity Clamping (Derivative Limiting) to turn sharp, 
-        instantaneous camera glitches into gentle slopes, preventing filter ringing.
-        """
         if len(x) < 2:
             return x
-        
-        # 1. Calculate the frame-to-frame velocity
         diffs = np.diff(x)
-        
-        # 2. Find the normal maximum speed of the heartbeat
         std_diff = np.std(diffs)
-        
         if std_diff > 0:
-            # 3. Clamp the velocity. 3.0 std allows strong heartbeats to pass, 
-            # but completely stops instantaneous vertical glitches.
             clamped_diffs = np.clip(diffs, -3.0 * std_diff, 3.0 * std_diff)
-            
-            # 4. Reconstruct the signal by integrating the clamped velocity
             reconstructed = np.concatenate(([x[0]], x[0] + np.cumsum(clamped_diffs)))
             return reconstructed
-            
         return x
