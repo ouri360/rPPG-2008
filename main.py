@@ -44,7 +44,7 @@ def main():
         ax3.set_xlabel("Frequency (Hz)")
         ax3.set_ylabel("Power")
 
-    VIDEO_SOURCE = "dataset/subject1.mp4" # Or set to "dataset/subject1.mp4"
+    VIDEO_SOURCE = 0 # Or set to "dataset/subject1.mp4"
     GT_FILE = "dataset/gt_subject1.txt"
     # Initialize the Ground Truth Reader
     gt_reader = GroundTruthReader(GT_FILE)

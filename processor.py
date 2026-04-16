@@ -190,17 +190,24 @@ class SignalProcessor:
         if len(self.raw_g) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None, None, None, None, None
 
-        # Call our new ICA method
-        best_component, all_components = self.get_ica_signal()
+        # Call the ICA method (we use '_' to discard the automatic selection)
+        _, all_components = self.get_ica_signal()
         
-        if best_component is None:
+        # Safety check: Ensure ICA actually returned enough components
+        if all_components is None or len(all_components) < 2:
             return None, None, None, None, None
             
+        # ==========================================
+        # HARDCODED COMPONENT SELECTION (Poh et al., 2010)
+        # Component 2 corresponds to index 1 in Python
+        # ==========================================
+        selected_component = all_components[1] 
+        
         n_fft = NFFT
         
-        # Apply the Hanning Window to the BEST component
-        window = np.hanning(len(best_component))
-        windowed_filt = best_component * window
+        # Apply the Hanning Window to our strictly selected component
+        window = np.hanning(len(selected_component))
+        windowed_filt = selected_component * window
         
         # Compute the Power Spectra
         fft_filtered_complex = np.fft.rfft(windowed_filt, n=n_fft)
@@ -219,6 +226,7 @@ class SignalProcessor:
         peak_index = np.argmax(bpm_filt_mag)
         dominant_freq = bpm_freqs[peak_index]
         
+        # Parabolic interpolation for sub-bin frequency resolution
         if 0 < peak_index < len(bpm_filt_mag) - 1:
             y0, y1, y2 = bpm_filt_mag[peak_index-1 : peak_index+2]
             if (y0 - 2*y1 + y2) != 0: 
@@ -231,8 +239,8 @@ class SignalProcessor:
         self.bpm_buffer.append(raw_bpm)
         smoothed_bpm = sum(self.bpm_buffer) / len(self.bpm_buffer)
         
-        # Notice we are now returning 5 items!
-        return smoothed_bpm, plot_freqs, plot_filt_mag, best_component, all_components
+        # Return the selected_component so your matplotlib dashboard updates correctly
+        return smoothed_bpm, plot_freqs, plot_filt_mag, selected_component, all_components
     
     def get_current_fps(self) -> float:
         """Returns actual measured FPS from the last ~1 second of timestamps."""
