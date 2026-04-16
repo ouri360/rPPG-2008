@@ -38,7 +38,7 @@ def main():
         line_best, = ax2.plot([], [], 'k-', label='Selected Heartbeat', linewidth=2)
         ax2.set_title("2. Unmixed ICA Components")
         ax2.legend(loc='upper right')
-        ax2.set_ylim(-4, 4)
+        ax2.set_ylim(-2, 2)
 
         # 3. Filtered FFT (After Filter)
         line_fft, = ax3.plot([], [], 'm-') 

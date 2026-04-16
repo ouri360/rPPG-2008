@@ -12,7 +12,7 @@ import numpy as np
 import logging
 from collections import deque
 from typing import Tuple, Optional
-from scipy.signal import butter, sosfiltfilt, detrend
+from scipy.signal import butter, filtfilt, firwin, sosfiltfilt, detrend
 from sklearn.decomposition import FastICA
 
 # Minimum number of seconds required to perform filtering and FFT analysis
@@ -140,12 +140,22 @@ class SignalProcessor:
         # POH 2010 EXACT IMPLEMENTATION: 
         # Always select the second component (index 1)
         # ==========================================
-        sos = butter(ORDER, [LOWCUT_HZ, HIGHCUT_HZ], btype='bandpass', fs=self.target_fps, output='sos')
+        # 1. Generate the FIR filter coefficients
+        taps = firwin(
+            numtaps=71, 
+            cutoff=[LOWCUT_HZ, HIGHCUT_HZ], 
+            fs=self.target_fps, 
+            pass_zero=False
+        )
+
+        # 2. Calculate a safe padding length based on the current signal size
+        # SciPy requires padlen to be STRICTLY LESS than the length of the input vector
+        safe_padlen = min(4 * len(taps), len(g_uni) - 1)
         
         all_filtered_components = []
         for i in range(3):
             # Apply the bandpass filter to all components so they can be plotted
-            filtered_comp = sosfiltfilt(sos, S[:, i])
+            filtered_comp = filtfilt(taps, 1.0, S[:, i], padlen=safe_padlen)
             all_filtered_components.append(filtered_comp)
             
         # Strictly select the second component (index 1)
