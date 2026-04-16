@@ -3,11 +3,15 @@ Main application for rPPG signal extraction.
 ---------------------------------------
 Integrates webcam streaming, ML face meshing, and signal processing.
 Displays a 3-panel live plot showing Time and Frequency domains.
+Logs final performance metrics to file.
 """
 
 import cv2
+import os
 import logging
+import numpy as np
 import matplotlib.pyplot as plt
+from PerformanceLogger import PerformanceLogger
 from webcam import WebcamStream
 from detector import FaceDetector
 from processor import SignalProcessor
@@ -39,21 +43,28 @@ def main():
         ax3.set_xlabel("Frequency (Hz)")
         ax3.set_ylabel("Power")
 
-    # Make sure this points to the right video and GT file!
+    # Target files
     VIDEO_SOURCE = "dataset/subject1.mp4" 
     GT_FILE = "dataset/gt_subject1.txt" 
     
     gt_reader = GroundTruthReader(GT_FILE)
-    
-    # 30-second buffer for maximum frequency resolution!
-    processor = SignalProcessor(buffer_seconds=30, target_fps=30.0)
+    logger = PerformanceLogger(output_dir="rppg_test")
+
+    # Variables to track the final state for logging
+    final_bpm = None
+    final_gt = None
+    final_filtered_data = None
+    final_freqs = None
+    final_filt_mag = None
 
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         frame_counter = 0
+        processor = SignalProcessor(buffer_seconds=30, target_fps=cam.fps)
 
         while True:
             success, frame = cam.read_frame()
             if not success: 
+                logging.info("Video stream ended.")
                 break
 
             frame_counter += 1
@@ -67,39 +78,42 @@ def main():
             rois = detector.get_face_mesh_rois(frame)
 
             if rois:
-                # Send the polygons to the pixel sorter
                 processor.extract_and_buffer_multi(frame, rois, timestamp)
                 
-                # Draw the dynamic ML polygons on the live feed
                 for name, polygon in rois.items():
                     cv2.polylines(frame, [polygon], isClosed=True, color=(0, 255, 0), thickness=2)
 
             # ==================================================
             # 2. HEADS UP DISPLAY (Static Screen Coordinates)
             # ==================================================
-            # Draw FPS at the very top
             fps = processor.get_current_fps()
             cv2.putText(frame, f"FPS: {fps:.1f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-            # Calculate and Draw Estimated BPM (Red)
             bpm, freqs, filt_mag = processor.estimate_heart_rate()
+            filtered_data = processor.get_filtered_signal()
+            gt_hr = gt_reader.get_hr_at_time(timestamp)
+
+            # Update final variables for logging whenever valid data exists
             if bpm is not None:
+                final_bpm = bpm
+                final_freqs = freqs
+                final_filt_mag = filt_mag
                 cv2.putText(frame, f"Est BPM: {bpm:.1f}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
             else:
                 cv2.putText(frame, "Calc BPM...", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
-            # Extract and Draw Ground Truth (Green)
-            gt_hr = gt_reader.get_hr_at_time(timestamp)
-            if gt_hr is not None:
-                cv2.putText(frame, f"True HR: {gt_hr:.1f}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            if filtered_data is not None:
+                final_filtered_data = np.array(filtered_data)
 
+            if gt_hr is not None:
+                final_gt = gt_hr
+                cv2.putText(frame, f"True HR: {gt_hr:.1f}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
             # ==================================================
             # 3. MATPLOTLIB DASHBOARD
             # ==================================================
             if DEBUG_MODE and (frame_counter % 3 == 0):
-                signal_data = list(processor.raw_signal)
-                filtered_data = processor.get_filtered_signal()
+                signal_data = list(processor.raw_signal) if hasattr(processor, 'raw_signal') else []
 
                 if len(signal_data) > 10:
                     line1.set_xdata(range(len(signal_data)))
@@ -131,7 +145,28 @@ def main():
                 
     if DEBUG_MODE:
         plt.ioff()
-        plt.show()
+        plt.close()
+
+    # ==================================================
+    # 4. EXPORT RESULTS
+    # ==================================================
+    print("\n--- Finalizing and Logging Data ---")
+    if final_bpm is not None and final_gt is not None:
+        video_filename = os.path.basename(VIDEO_SOURCE)
+        logger.log_video_result(
+            video_name=video_filename,
+            estimated_bpm=final_bpm,
+            real_bpm=final_gt,
+            filtered_signal=final_filtered_data,
+            fft_freqs=final_freqs,
+            fft_power=final_filt_mag
+        )
+        # Generate the CSV immediately
+        logger.export_summary_table()
+    else:
+        print("Warning: Could not log results. Not enough valid BPM or GT data was collected during the run.")
 
 if __name__ == "__main__":
+    # Configure basic logging level
+    logging.basicConfig(level=logging.INFO)
     main()

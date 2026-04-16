@@ -12,15 +12,15 @@ import numpy as np
 import logging
 from collections import deque
 from typing import Tuple, Optional
-from scipy.signal import butter, sosfiltfilt, detrend, bessel
+from scipy.signal import butter, sosfiltfilt, detrend, bessel, filtfilt, firwin, cheby2
 import cv2
 
 # Minimum number of seconds required to perform filtering and FFT analysis
 MINIMUM_AMOUNT_OF_DATA = 4 
 # Filter parameters for bandpass filter (these can be tuned based on expected heart rate range)
-LOWCUT_HZ = 0.7         # Corresponds to ~42 BPM
-HIGHCUT_HZ = 3.0          # Corresponds to ~180 BPM
-ORDER = 2               # Filter order (x2 with sosfiltfilt for zero phase distortion)
+LOWCUT_HZ = 0.75         # Corresponds to ~45 BPM
+HIGHCUT_HZ = 2.5          # Corresponds to ~150 BPM
+ORDER = 4               # Filter order (x2 with sosfiltfilt for zero phase distortion)
 NFFT = 8192             # Number of points for FFT (zero-padding for better frequency resolution)
 
 class SignalProcessor:
@@ -137,9 +137,21 @@ class SignalProcessor:
         highcut = HIGHCUT_HZ
         order = ORDER
         
-        # 4. Apply the High-Precision Butterworth
-        sos = bessel(order, [lowcut, highcut], btype='bandpass', fs=self.target_fps, output='sos')
-        filtered_signal = sosfiltfilt(sos, signal_uniform)
+        b, a = butter(
+            N=ORDER, 
+            Wn=[LOWCUT_HZ, HIGHCUT_HZ], 
+            btype='bandpass', 
+            fs=self.target_fps, 
+            output='ba'
+        )
+
+        # 2. Calculate a safe padding length based on the current signal size
+        # The default padlen is 4 * max(len(a), len(b)). 
+        # For an N=4 bandpass, len(a) and len(b) are 9, so the default padlen is 27.
+        safe_padlen = min(4 * max(len(a), len(b)), len(signal_uniform) - 1)
+
+        # 3. Apply the zero-phase filter using standard filtfilt
+        filtered_signal = filtfilt(b, a, signal_uniform, padlen=safe_padlen)
         
         return filtered_signal
     
