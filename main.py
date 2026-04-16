@@ -27,6 +27,7 @@ def main():
         line_r, = ax1.plot([], [], 'r-', label='Red', alpha=0.7)
         line_g, = ax1.plot([], [], 'g-', label='Green', alpha=0.7)
         line_b, = ax1.plot([], [], 'b-', label='Blue', alpha=0.7)
+        
         ax1.set_title("1. Raw RGB Signals")
         ax1.legend(loc='upper right')
 
@@ -37,6 +38,7 @@ def main():
         line_best, = ax2.plot([], [], 'k-', label='Selected Heartbeat', linewidth=2)
         ax2.set_title("2. Unmixed ICA Components")
         ax2.legend(loc='upper right')
+        ax2.set_ylim(-4, 4)
 
         # 3. Filtered FFT (After Filter)
         line_fft, = ax3.plot([], [], 'm-') 
@@ -44,7 +46,7 @@ def main():
         ax3.set_xlabel("Frequency (Hz)")
         ax3.set_ylabel("Power")
 
-    VIDEO_SOURCE = 0 # Or set to "dataset/subject1.mp4"
+    VIDEO_SOURCE = "dataset/subject1.mp4" # Or set to "dataset/subject1.mp4"
     GT_FILE = "dataset/gt_subject1.txt"
     # Initialize the Ground Truth Reader
     gt_reader = GroundTruthReader(GT_FILE)

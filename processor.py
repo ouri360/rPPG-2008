@@ -137,52 +137,19 @@ class SignalProcessor:
             return None, None
             
         # ==========================================
-        # POH 2010 EXACT IMPLEMENTATION: Spectral Peak Selection
-        # Instead of variance, we find the component with the sharpest 
-        # periodic frequency peak in the human heart rate band.
+        # POH 2010 EXACT IMPLEMENTATION: 
+        # Always select the second component (index 1)
         # ==========================================
-        lowcut = LOWCUT_HZ
-        highcut = HIGHCUT_HZ
-        sos = butter(ORDER, [lowcut, highcut], btype='bandpass', fs=self.target_fps, output='sos')
+        sos = butter(ORDER, [LOWCUT_HZ, HIGHCUT_HZ], btype='bandpass', fs=self.target_fps, output='sos')
         
-        best_component = None
-        max_snr = -1
         all_filtered_components = []
-        
-        n_fft = NFFT
-        frequencies = np.fft.rfftfreq(n_fft, d=1.0/self.target_fps)
-        
-        # Only look for peaks within the human heart rate band
-        valid_idx = np.where((frequencies >= LOWCUT_HZ) & (frequencies <= HIGHCUT_HZ))[0]
-        
         for i in range(3):
-            # 1. Apply the bandpass filter
+            # Apply the bandpass filter to all components so they can be plotted
             filtered_comp = sosfiltfilt(sos, S[:, i])
             all_filtered_components.append(filtered_comp)
             
-            # 2. Run FFT to analyze the frequency purity
-            window = np.hanning(len(filtered_comp))
-            power_spectrum = np.abs(np.fft.rfft(filtered_comp * window, n=n_fft))**2
-            
-            passband_power = power_spectrum[valid_idx]
-            
-            # 3. Find the exact index of the tallest peak
-            peak_idx = np.argmax(passband_power)
-            
-            # 4. Calculate SNR (Signal vs Background Noise)
-            # We sum the peak and its immediate neighbors to capture the full heartbeat energy
-            peak_region = passband_power[max(0, peak_idx-1) : min(len(passband_power), peak_idx+2)]
-            peak_power = np.sum(peak_region)
-            
-            total_power = np.sum(passband_power)
-            background_power = total_power - peak_power
-            
-            snr = peak_power / (background_power + 1e-8)
-            
-            # 5. Select the component with the highest SNR (the cleanest wave)
-            if snr > max_snr:
-                max_snr = snr
-                best_component = filtered_comp
+        # Strictly select the second component (index 1)
+        best_component = all_filtered_components[1]
                 
         return best_component, all_filtered_components
     
@@ -190,18 +157,12 @@ class SignalProcessor:
         if len(self.raw_g) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None, None, None, None, None
 
-        # Call the ICA method (we use '_' to discard the automatic selection)
-        _, all_components = self.get_ica_signal()
+        # Call the ICA method and accept its strictly selected component
+        selected_component, all_components = self.get_ica_signal()
         
-        # Safety check: Ensure ICA actually returned enough components
-        if all_components is None or len(all_components) < 2:
+        # Safety check: Ensure ICA actually returned a valid component
+        if selected_component is None:
             return None, None, None, None, None
-            
-        # ==========================================
-        # HARDCODED COMPONENT SELECTION (Poh et al., 2010)
-        # Component 2 corresponds to index 1 in Python
-        # ==========================================
-        selected_component = all_components[1] 
         
         n_fft = NFFT
         
