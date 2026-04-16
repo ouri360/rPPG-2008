@@ -126,12 +126,19 @@ class SignalProcessor:
         b_u = np.interp(t_uniform, ts, b)
         
         # ==========================================
-        # DSP UPGRADE: Continuous Rolling POS Algorithm
+        # DSP UPGRADE 1: Pre-POS Anti-Movement Clamping
+        # We crush the physical movement spikes BEFORE they enter the POS math!
         # ==========================================
-        window_size = int(self.target_fps * 1.5)
+        r_u = self.remove_impulse_noise(r_u)
+        g_u = self.remove_impulse_noise(g_u)
+        b_u = self.remove_impulse_noise(b_u)
+        
+        # ==========================================
+        # DSP UPGRADE 2: 2.0-Second POS Window
+        # ==========================================
+        window_size = int(self.target_fps * 2.0)
         
         # 1. Rolling Temporal Normalization
-        # Normalizes each frame against its local 1.5s neighborhood, not the whole 30s!
         r_mean = uniform_filter1d(r_u, size=window_size)
         g_mean = uniform_filter1d(g_u, size=window_size)
         b_mean = uniform_filter1d(b_u, size=window_size)
@@ -145,12 +152,11 @@ class SignalProcessor:
         s2 = -2.0 * r_n + g_n + b_n
 
         # 3. Dynamic Rolling Alpha
-        # Calculates variance (E[X^2] - E[X]^2) locally so alpha adapts to every single heartbeat!
         def rolling_std(x, w):
             mean_x = uniform_filter1d(x, size=w)
             mean_x2 = uniform_filter1d(x**2, size=w)
             var = mean_x2 - mean_x**2
-            var = np.maximum(var, 0) # Prevent negative roots from floating point math
+            var = np.maximum(var, 0) # Prevent negative floating point roots
             return np.sqrt(var)
             
         std_s1 = rolling_std(s1, window_size)
@@ -160,12 +166,8 @@ class SignalProcessor:
         
         # 4. Final POS Pulse Wave
         pos_signal = s1 + alpha * s2
-        # ==========================================
         
-        # Prevent Filter Ringing
-        pos_signal = self.remove_impulse_noise(pos_signal)
-        
-        # Detrend and Normalize
+        # Detrend and Normalize (Removes the gentle slope left by the clamp)
         pos_signal = self.detrend_and_normalize(pos_signal)
 
         # Apply High-Precision Butterworth Bandpass
@@ -242,12 +244,31 @@ class SignalProcessor:
     
     @staticmethod
     def remove_impulse_noise(x: np.ndarray) -> np.ndarray:
+        """
+        Uses Robust Percentile Velocity Clamping to decapitate sudden movement spikes 
+        while perfectly preserving the gentle pixel speed of a normal human heartbeat.
+        """
         if len(x) < 2:
             return x
+            
         diffs = np.diff(x)
-        std_diff = np.std(diffs)
-        if std_diff > 0:
-            clamped_diffs = np.clip(diffs, -3.0 * std_diff, 3.0 * std_diff)
-            reconstructed = np.concatenate(([x[0]], x[0] + np.cumsum(clamped_diffs)))
-            return reconstructed
-        return x
+        abs_diffs = np.abs(diffs)
+        
+        # ==========================================
+        # DSP UPGRADE: The Percentile Shield
+        # 85% of the time, the subject is relatively still (only blood is pulsing).
+        # We find this normal speed and enforce it relentlessly.
+        # ==========================================
+        normal_speed = float(np.percentile(abs_diffs, 85))
+        
+        # Strict clamp: No pixel is allowed to change faster than 1.5x the normal heartbeat speed
+        max_velocity = normal_speed * 1.5
+        
+        # Epsilon fallback in case the subject is perfectly frozen like a statue
+        if max_velocity == 0:
+            max_velocity = 1e-5
+            
+        clamped_diffs = np.clip(diffs, -max_velocity, max_velocity)
+        reconstructed = np.concatenate(([x[0]], x[0] + np.cumsum(clamped_diffs)))
+        
+        return reconstructed
