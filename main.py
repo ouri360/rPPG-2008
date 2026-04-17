@@ -5,6 +5,7 @@ Integrates webcam streaming, ML face meshing, and signal processing.
 Displays a 3-panel live plot showing Time and Frequency domains.
 """
 
+import logging
 import cv2
 import matplotlib.pyplot as plt
 import time
@@ -36,7 +37,7 @@ def main():
         ax3.set_xlabel("Frequency (Hz)")
         ax3.set_ylabel("Power")
 
-    VIDEO_SOURCE = 0 
+    VIDEO_SOURCE = 0 # or "dataset/subject1.mp4"
     GT_FILE = "dataset/gt_subject1.txt" 
     
     gt_reader = GroundTruthReader(GT_FILE)
@@ -51,6 +52,7 @@ def main():
         while True:
             success, frame = cam.read_frame()
             if not success:
+                logging.warning("OpenCV FFMPEG reached End-of-File or dropped the stream early.")
                 break
             frame_counter += 1
 
