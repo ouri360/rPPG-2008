@@ -58,7 +58,8 @@ def main():
 
         while True:
             success, frame = cam.read_frame()
-            if not success: break
+            if not success:
+                break
             frame_counter += 1
 
             # Context-Aware Timeline
