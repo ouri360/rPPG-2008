@@ -24,31 +24,36 @@ def main():
         fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 10))
         fig.tight_layout(pad=4.0)
 
-        # 1. Raw Time Signal
         line1, = ax1.plot([], [], 'g-')
         ax1.set_title("1. Raw Signal (Trimmed Mean Skin)")
         ax1.set_ylabel("Amplitude")
 
-        # 2. Filtered Time Signal
         line2, = ax2.plot([], [], 'b-')
         ax2.set_title("2. Filtered Signal (Time Domain)")
         ax2.set_ylabel("Amplitude")
 
-        # 3. Filtered FFT (After Filter)
         line3, = ax3.plot([], [], 'm-') 
         ax3.set_title("3. Filtered FFT (Power Spectrum)")
         ax3.set_xlabel("Frequency (Hz)")
         ax3.set_ylabel("Power")
 
-    # Make sure this points to the right video and GT file!
     VIDEO_SOURCE = 0 
     GT_FILE = "dataset/gt_subject1.txt" 
     
     gt_reader = GroundTruthReader(GT_FILE)
     
+    # ==========================================
+    # DSP UPGRADE: Display Caching Variables
+    # ==========================================
+    last_calculated_bpm = None
+    last_freqs = None
+    last_filt_mag = None
+    
+    import time # Ensure this is imported at the top of your file!
+    
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         frame_counter = 0
-        processor = SignalProcessor(buffer_seconds=30, target_fps=cam.fps)
+        processor = SignalProcessor(buffer_seconds=30, target_fps=cam.fps) # Fixed to 30s!
 
         while True:
             success, frame = cam.read_frame()
@@ -56,47 +61,46 @@ def main():
                 break
 
             frame_counter += 1
-            
-            # True physical timeline
-            timestamp = time.time()
+            timestamp = time.time() # True physical timeline
 
-            # ==================================================
-            # 1. ML FACE MESHING & SIGNAL EXTRACTION
-            # ==================================================
+            # 1. ALWAYS Run Facial Extraction (Extremely fast, maintains perfect resolution)
             rois = detector.get_face_mesh_rois(frame)
 
             if rois:
-                # Send the polygons to the pixel sorter
                 processor.extract_and_buffer_multi(frame, rois, timestamp)
-                
-                # Draw the dynamic ML polygons on the live feed
                 for name, polygon in rois.items():
                     cv2.polylines(frame, [polygon], isClosed=True, color=(0, 255, 0), thickness=2)
 
             # ==================================================
-            # 2. HEADS UP DISPLAY (Static Screen Coordinates)
+            # DSP UPGRADE: Asynchronous Heavy Math
+            # Only run the brutal POS Loop and FFT every 15 frames!
             # ==================================================
-            # Draw FPS at the very top
+            if frame_counter % 15 == 0:
+                bpm, freqs, filt_mag = processor.estimate_heart_rate()
+                if bpm is not None:
+                    last_calculated_bpm = bpm
+                    last_freqs = freqs
+                    last_filt_mag = filt_mag
+
+            # 2. HEADS UP DISPLAY
             fps = processor.get_current_fps()
             cv2.putText(frame, f"FPS: {fps:.1f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-            # Calculate and Draw Estimated BPM (Red)
-            bpm, freqs, filt_mag = processor.estimate_heart_rate()
-            if bpm is not None:
-                cv2.putText(frame, f"Est BPM: {bpm:.1f}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            # Draw the cached BPM so the screen doesn't flicker
+            if last_calculated_bpm is not None:
+                cv2.putText(frame, f"Est BPM: {last_calculated_bpm:.1f}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
             else:
                 cv2.putText(frame, "Calc BPM...", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
-            # Extract and Draw Ground Truth (Green)
             gt_hr = gt_reader.get_hr_at_time(timestamp)
             if gt_hr is not None:
                 cv2.putText(frame, f"True HR: {gt_hr:.1f}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-
             # ==================================================
-            # 3. MATPLOTLIB DASHBOARD
+            # 3. THROTTLED MATPLOTLIB DASHBOARD
+            # Only draw the heavy GUI when we actually update the math (every 15 frames)
             # ==================================================
-            if DEBUG_MODE and (frame_counter % 3 == 0):
+            if DEBUG_MODE and (frame_counter % 15 == 0):
                 signal_data = list(processor.raw_signal)
                 filtered_data = processor.get_filtered_signal()
 
@@ -112,9 +116,9 @@ def main():
                     ax2.relim()
                     ax2.autoscale_view()
 
-                if bpm is not None:
-                    line3.set_xdata(freqs)
-                    line3.set_ydata(filt_mag)
+                if last_calculated_bpm is not None:
+                    line3.set_xdata(last_freqs)
+                    line3.set_ydata(last_filt_mag)
                     ax3.relim()
                     ax3.autoscale_view()
 
