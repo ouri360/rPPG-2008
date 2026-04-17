@@ -37,7 +37,6 @@ def main():
         line_best, = ax2.plot([], [], 'k-', label='Selected Heartbeat', linewidth=2)
         ax2.set_title("2. Unmixed ICA Components")
         ax2.legend(loc='upper right')
-        ax2.set_ylim(-2, 2)
 
         line_fft, = ax3.plot([], [], 'm-') 
         ax3.set_title("3. Final FFT (Selected Component)")
@@ -96,7 +95,7 @@ def main():
                 if last_bpm is not None:
                     cv2.putText(frame, f"BPM: {last_bpm:.1f}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
                 else:
-                    cv2.putText(frame, "Calcul BPM...", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                    cv2.putText(frame, "Calc. BPM...", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
                 gt_hr = gt_reader.get_hr_at_time(timestamp)
                 if gt_hr is not None:
