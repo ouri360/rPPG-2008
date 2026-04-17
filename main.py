@@ -12,8 +12,9 @@ from webcam import WebcamStream
 from detector import FaceDetector
 from processor import SignalProcessor
 from gt import GroundTruthReader
+import time
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 def main():
     detector = FaceDetector()
@@ -45,11 +46,9 @@ def main():
     
     gt_reader = GroundTruthReader(GT_FILE)
     
-    # 30-second buffer for maximum frequency resolution!
-    processor = SignalProcessor(buffer_seconds=15, target_fps=30.0)
-
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         frame_counter = 0
+        processor = SignalProcessor(buffer_seconds=30, target_fps=cam.fps)
 
         while True:
             success, frame = cam.read_frame()
@@ -58,8 +57,8 @@ def main():
 
             frame_counter += 1
             
-            # 100% Synthetic Flawless Timeline
-            timestamp = frame_counter / cam.fps
+            # True physical timeline
+            timestamp = time.time()
 
             # ==================================================
             # 1. ML FACE MESHING & SIGNAL EXTRACTION

@@ -63,7 +63,7 @@ class FaceDetector:
             for idx in indices:
                 pt = landmarks.landmark[idx]
                 
-                # Use raw, unadulterated AI coordinates!
+                # Use raw AI coordinates
                 raw_x = pt.x * w
                 raw_y = pt.y * h
                 

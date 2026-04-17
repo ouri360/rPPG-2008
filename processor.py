@@ -13,7 +13,7 @@ from typing import Tuple, Optional
 from scipy.signal import butter, detrend, sosfiltfilt
 import cv2
 
-MINIMUM_AMOUNT_OF_DATA = 4 
+MINIMUM_AMOUNT_OF_DATA = 2 
 LOWCUT_HZ = 0.7         # Lowered to 42 BPM to safely capture resting heart rates
 HIGHCUT_HZ = 3.0        # Raised to 180 BPM to capture elevated heart rates
 ORDER = 3               # Standardized order for steep frequency cutoffs
@@ -22,10 +22,11 @@ NFFT = 8192
 class SignalProcessor:
     def __init__(self, buffer_seconds: int = 30, target_fps: float = 30.0):
         self.target_fps = target_fps
+        self.buffer_seconds = buffer_seconds
         self.max_length = int(buffer_seconds * target_fps)
         
         # ==========================================
-        # DSP UPGRADE: 3-Channel Architecture
+        # 3-Channel Architecture
         # POS requires independent tracking of Red, Green, and Blue.
         # ==========================================
         self.raw_r = deque(maxlen=self.max_length)
@@ -41,7 +42,7 @@ class SignalProcessor:
         self.bpm_buffer = deque(maxlen=smoothing_frames) 
         self.last_valid_bpm = None
         
-        logging.info("SignalProcessor upgraded to POS RGB Architecture.")
+        logging.info("SignalProcessor using to POS RGB Architecture.")
 
     def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict, timestamp: float) -> float:
         weights = {
@@ -68,25 +69,9 @@ class SignalProcessor:
             if len(g_pixels) == 0:
                 continue
                 
-            # ==========================================
-            # Synchronized 3-Channel Sorting
-            # We use the Green channel's luminance to find the glare/shadows,
-            # and apply those exact same drop indices to Red and Blue!
-            # ==========================================
-            sort_indices = np.argsort(g_pixels)
-            
-            bottom_trim = int(len(sort_indices) * 0.05)
-            top_trim = int(len(sort_indices) * 0.20)
-            
-            if bottom_trim > 0 and top_trim > 0:
-                valid_indices = sort_indices[bottom_trim:-top_trim]
-            else:
-                valid_indices = sort_indices
-                
-            r_val = float(np.mean(r_pixels[valid_indices]))
-            g_val = float(np.mean(g_pixels[valid_indices]))
-            b_val = float(np.mean(b_pixels[valid_indices]))
-            # ==========================================
+            r_val = float(np.mean(r_pixels))
+            g_val = float(np.mean(g_pixels))
+            b_val = float(np.mean(b_pixels))
             
             weighted_r += r_val * weights[region_name]
             weighted_g += g_val * weights[region_name]
@@ -108,17 +93,28 @@ class SignalProcessor:
         if len(self.raw_g) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None
 
-        # ==========================================
-        # 1. No Interpolation. Pure discrete frames.
-        # ==========================================
         r = np.array(list(self.raw_r))
         g = np.array(list(self.raw_g))
         b = np.array(list(self.raw_b))
         
-        C = np.vstack([r, g, b])
+        # Timestamps array
+        ts = np.array(list(self.timestamps))
+
+        # ==========================================
+        # 1. Temporal Resampling
+        # POS strictly requires uniform matrices. We interpolate 
+        # the erratic physical frames into a flawless 30Hz grid.
+        # ==========================================
+        dt = 1.0 / self.target_fps
+        t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
+        
+        r_u = np.interp(t_uniform, ts, r)
+        g_u = np.interp(t_uniform, ts, g)
+        b_u = np.interp(t_uniform, ts, b)
+        
+        C = np.vstack([r_u, g_u, b_u])
         N = C.shape[1]
         
-        # Sliding window (1.6 seconds)
         L = int(self.target_fps * 1.6) 
         H = np.zeros(N)
         
@@ -128,26 +124,24 @@ class SignalProcessor:
         for n in range(N - L + 1):
             C_window = C[:, n:n+L]
             
-            # Temporal Normalization
             mean_c = np.mean(C_window, axis=1, keepdims=True)
             Cn = C_window / (mean_c + 1e-8)
             
-            # Skin-Tone Projections
             S1 = Cn[1, :] - Cn[2, :]
             S2 = -2.0 * Cn[0, :] + Cn[1, :] + Cn[2, :]
             
-            # Alpha Tuning
             alpha = np.std(S1) / (np.std(S2) + 1e-8)
-            
-            # Pulse Extraction
             h = S1 + alpha * S2
             
-            # Overlap-Add (Zero-mean the segment, add to master array)
             H[n:n+L] += (h - np.mean(h))
             
         # ==========================================
-        # 3. Direct Filtering (No Detrend, No Envelope Flattening)
+        # 3. Direct Filtering
+        # Detrend guarantees a zero-mean, flat DC line so the 
+        # Butterworth filter doesn't panic on the Overlap-Add envelope!
         # ==========================================
+        H = detrend(H)
+        
         sos = butter(ORDER, [LOWCUT_HZ, HIGHCUT_HZ], btype='bandpass', fs=self.target_fps, output='sos')
         filtered_signal = sosfiltfilt(sos, H)
         
@@ -161,7 +155,7 @@ class SignalProcessor:
         if filtered_signal is None:
             return None, None, None
             
-        # 1. Hanning Window to squash the OLA envelope edges to zero naturally
+        # 1. Hanning Window
         window = np.hanning(len(filtered_signal))
         windowed_filt = filtered_signal * window
         
@@ -179,13 +173,8 @@ class SignalProcessor:
         # 4. Pure Argmax Peak Detection
         peak_index = np.argmax(bpm_filt_mag)
         raw_bpm = bpm_freqs[peak_index] * 60.0
-        
-        # Plotting arrays
-        plot_indices = np.where((frequencies >= 0.0) & (frequencies <= 4.0))[0]
-        plot_freqs = frequencies[plot_indices]
-        plot_filt_mag = filtered_power[plot_indices]
-        
-        return raw_bpm, plot_freqs, plot_filt_mag
+
+        return raw_bpm, bpm_freqs, bpm_filt_mag
     
     def get_current_fps(self) -> float:
         if len(self.timestamps) < 2:
