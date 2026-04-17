@@ -14,7 +14,7 @@ from processor import SignalProcessor
 from gt import GroundTruthReader
 import time
 
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 def main():
     detector = FaceDetector()
@@ -43,13 +43,11 @@ def main():
     gt_reader = GroundTruthReader(GT_FILE)
     
     # ==========================================
-    # DSP UPGRADE: Display Caching Variables
+    # Display Caching Variables
     # ==========================================
     last_calculated_bpm = None
     last_freqs = None
     last_filt_mag = None
-    
-    import time # Ensure this is imported at the top of your file!
     
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         frame_counter = 0
