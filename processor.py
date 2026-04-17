@@ -13,7 +13,7 @@ import logging
 import cv2
 from collections import deque
 from typing import Tuple, Optional
-from scipy.signal import butter, filtfilt, firwin, sosfiltfilt, detrend
+from scipy.signal import filtfilt, firwin, detrend
 from sklearn.decomposition import FastICA
 
 # Minimum number of seconds required to perform filtering and FFT analysis
@@ -50,7 +50,7 @@ class SignalProcessor:
 
         self.timestamps = deque(maxlen=self.max_length)
 
-        # Buffer for smoothing BPM estimates over time (average over the last 5 seconds)
+        # Buffer for smoothing BPM estimates over time (average over the last 1 second)
         smoothing_frames = int(self.target_fps * 1)
         self.bpm_buffer = deque(maxlen=smoothing_frames) 
 
@@ -82,12 +82,6 @@ class SignalProcessor:
         self.raw_g.append(final_g)
         self.raw_b.append(final_b)
         self.timestamps.append(timestamp)
-
-    def get_signal_data(self) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Retrieves the current buffers as NumPy arrays for filtering/FFT.
-        """
-        return np.array(self.raw_signal), np.array(self.timestamps)
     
     def get_ica_signal(self) -> Tuple[Optional[np.ndarray], Optional[list]]:
         if len(self.raw_g) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
@@ -126,7 +120,7 @@ class SignalProcessor:
             import warnings
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                ica = FastICA(n_components=3, random_state=42)
+                ica = FastICA(n_components=3, random_state=42, max_iter=1000)
                 S = ica.fit_transform(X) 
         except ValueError:
             return None, None
@@ -137,14 +131,14 @@ class SignalProcessor:
             fs=self.target_fps, 
             pass_zero=False
         )
-        safe_padlen = min(4 * len(taps), len(g_uni) - 1)
+        safe_padlen = min(MINIMUM_AMOUNT_OF_DATA * len(taps), len(g_uni) - 1)
         
         all_filtered_components = []
         max_power = -1.0
         best_component_idx = 0
         
         # ==========================================
-        # DSP UPGRADE: Dynamic Component Selection
+        # Dynamic Component Selection
         # We find the component with the strongest physiological heartbeat.
         # ==========================================
         for i in range(3):
@@ -247,29 +241,4 @@ class SignalProcessor:
             return x
             
         return (x - np.mean(x)) / (std + 1e-8)
-    
-    @staticmethod
-    def remove_impulse_noise(x: np.ndarray) -> np.ndarray:
-        """
-        Uses Velocity Clamping (Derivative Limiting) to turn sharp, 
-        instantaneous camera glitches into gentle slopes, preventing filter ringing.
-        """
-        if len(x) < 2:
-            return x
-        
-        # 1. Calculate the frame-to-frame velocity
-        diffs = np.diff(x)
-        
-        # 2. Find the normal maximum speed of the heartbeat
-        std_diff = np.std(diffs)
-        
-        if std_diff > 0:
-            # 3. Clamp the velocity. 3.0 std allows strong heartbeats to pass, 
-            # but completely stops instantaneous vertical glitches.
-            clamped_diffs = np.clip(diffs, -3.0 * std_diff, 3.0 * std_diff)
-            
-            # 4. Reconstruct the signal by integrating the clamped velocity
-            reconstructed = np.concatenate(([x[0]], x[0] + np.cumsum(clamped_diffs)))
-            return reconstructed
-            
-        return x
+

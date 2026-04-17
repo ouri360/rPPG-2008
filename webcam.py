@@ -14,50 +14,40 @@ import numpy as np
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class WebcamStream:
-    """
-    Interface for capturing video frames from a live webcam OR a video file.
-    """
     def __init__(self, source: Union[int, str] = 0):
-        """
-        Initializes the video stream.
-        Args:
-            source: int (e.g., 0) for live webcam, or str (e.g., "video.mp4") for a file.
-        """
         self.source = source
-        self.cap = cv2.VideoCapture(self.source)
+        
+        # Explicit V4L2 Backend for Linux generic webcams
+        if isinstance(self.source, int):
+            self.cap = cv2.VideoCapture(self.source, cv2.CAP_V4L2)
+        else:
+            self.cap = cv2.VideoCapture(self.source)
         
         if not self.cap.isOpened():
             raise RuntimeError(f"Critical Error: Could not open video source: {self.source}.")
         
-        # Dynamically extract the exact FPS of the video file or camera
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-        # Fallback in case OpenCV fails to read the metadata
         if self.fps == 0 or np.isnan(self.fps):
             self.fps = 30.0 
-            logging.warning("Could not read FPS from source. Defaulting to 30.0 FPS.")
+            logging.warning("Could not read FPS from source. Defaulting to 30.0.")
 
-        logging.info(f"Video source initialized successfully. Operating at {self.fps} FPS.")
-
-        # Only apply hardware locking (Exposure/WB) if the source is a live physical camera (integer)
+        # V4L2 Hardware Locking
         if isinstance(self.source, int):
-            logging.info("Live camera detected. Attempting to lock hardware parameters...")
-            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25) 
-            self.cap.set(cv2.CAP_PROP_EXPOSURE, -5)
+            logging.info("Live camera detected. Locking V4L2 parameters...")
+            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) # 1 = Manual
+            self.cap.set(cv2.CAP_PROP_EXPOSURE, 100)
             self.cap.set(cv2.CAP_PROP_AUTO_WB, 0)
+            self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+            self.cap.set(cv2.CAP_PROP_FOCUS, 0)
             self.cap.set(cv2.CAP_PROP_FPS, 30)
 
     def read_frame(self) -> Tuple[bool, Optional[np.ndarray]]:
         ret, frame = self.cap.read()
-        if not ret:
-            # If playing a video file, ret=False means the video is finished.
-            logging.info("End of video stream reached or hardware failed.")
-            return False, None
-        return True, frame
+        return (True, frame) if ret else (False, None)
 
     def release(self) -> None:
         if self.cap.isOpened():
             self.cap.release()
-            logging.info("Video source released safely.")
 
     def __enter__(self):
         return self
@@ -70,7 +60,7 @@ class WebcamStream:
 if __name__ == "__main__":
     # Test script of the module
     try:
-        with WebcamStream(camera_index=0) as cam:
+        with WebcamStream(source=0) as cam:
             while True:
                 success, current_frame = cam.read_frame()
                 if not success:
