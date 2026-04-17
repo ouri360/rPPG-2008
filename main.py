@@ -2,7 +2,8 @@
 Main application for rPPG signal extraction.
 ---------------------------------------
 Integrates webcam streaming, ML face meshing, and signal processing.
-Displays a 3-panel live plot showing Time and Frequency domains.
+Displays a 3-panel live plot showing Time and Frequency domains,
+and overlays real-time BPM estimates and ground truth on the video feed.
 """
 
 import cv2
@@ -26,7 +27,7 @@ def main():
 
         # 1. Raw Time Signal
         line1, = ax1.plot([], [], 'g-')
-        ax1.set_title("1. Raw Signal (Trimmed Mean Skin)")
+        ax1.set_title("1. Raw Signal (Green Channel Average)")
         ax1.set_ylabel("Amplitude")
 
         # 2. Filtered Time Signal
@@ -40,8 +41,8 @@ def main():
         ax3.set_xlabel("Frequency (Hz)")
         ax3.set_ylabel("Power")
 
-    # Make sure this points to the right video and GT file!
-    VIDEO_SOURCE = "dataset/subject1.mp4" 
+    # Make sure this points to the right video and GT file
+    VIDEO_SOURCE = "dataset/subject1.mp4" # or 0 for live webcam
     GT_FILE = "dataset/gt_subject1.txt" 
     
     gt_reader = GroundTruthReader(GT_FILE)

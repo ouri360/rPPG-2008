@@ -24,26 +24,26 @@ class FaceDetector:
         )
         
         # ==========================================
-        # DSP UPGRADE: Ultra-Tight Vascular Landmarks
+        # Tight Vascular Landmarks
         # Strictly avoids hairlines, eyebrows, and smile lines.
         # ==========================================
         self.ROI_INDICES = {
-            # Forehead: Slightly wider and lower.
+            # Forehead:
             # Top edge: 67, 10, 297. 
             # Bottom edge: 299, 9, 69.
             'forehead': [67, 10, 297, 299, 9, 69],
             
-            # Left Cheek: Unchanged.
+            # Left Cheek
             'left_cheek': [117, 118, 101, 36, 205, 50],
             
-            # Right Cheek: Unchanged.
+            # Right Cheek
             'right_cheek': [346, 347, 330, 266, 425, 280]
         }
         
         # Dictionary to store the historical (x, y) coordinates of every single point
         self.smoothed_landmarks = {}
         
-        # Smoothing Factor: 0.15 is very strong. 
+        # Smoothing Factor: 0.15 (strong). 
         # It crushes 1-pixel vibrations but still allows head movement.
         self.alpha = 0.15 
         
@@ -76,7 +76,7 @@ class FaceDetector:
                 raw_y = pt.y * h
                 
                 # ==========================================
-                # DSP UPGRADE: Landmark Smoothing
+                # Landmark Smoothing
                 # Freeze the individual points in space using EMA
                 # ==========================================
                 if idx not in self.smoothed_landmarks:

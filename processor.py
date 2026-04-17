@@ -19,7 +19,7 @@ import cv2
 MINIMUM_AMOUNT_OF_DATA = 4 
 # Filter parameters for bandpass filter (these can be tuned based on expected heart rate range)
 LOWCUT_HZ = 0.7         # Corresponds to ~42 BPM
-HIGHCUT_HZ = 3.0          # Corresponds to ~180 BPM
+HIGHCUT_HZ = 3.0        # Corresponds to ~180 BPM
 ORDER = 2               # Filter order (x2 with sosfiltfilt for zero phase distortion)
 NFFT = 8192             # Number of points for FFT (zero-padding for better frequency resolution)
 
@@ -79,8 +79,8 @@ class SignalProcessor:
                 continue
                 
             # ==========================================
-            # DSP UPGRADE: Pixel Sorting (Trimmed Mean)
-            # Destroys Specular Glare and Shadows before they enter the buffer!
+            # Pixel Sorting (Trimmed Mean)
+            # Destroys Specular Glare and Shadows before they enter the buffer
             # ==========================================
             sorted_pixels = np.sort(skin_pixels)
             
@@ -126,7 +126,7 @@ class SignalProcessor:
         t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
         signal_uniform = np.interp(t_uniform, ts, signal)
         
-        # 2. Prevent Filter Ringing! 
+        # 2. Prevent Filter Ringing
         # Smooth out vertical cliffs into gentle slopes
         signal_uniform = self.remove_impulse_noise(signal_uniform)
         

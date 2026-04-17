@@ -2,7 +2,11 @@
 Webcam Streaming module with OpenCV library.
 ---------------------------------------
 This module provides a robust interface for capturing video frames from a USB webcam using OpenCV.
-It includes error handling for hardware issues and ensures proper resource management.
+It includes error handling for hardware issues and ensures proper resource management,
+such as releasing the camera when done. It also attempts to lock hardware parameters like 
+exposure and white balance for consistent rPPG signal quality. 
+The class supports both live webcam feeds and pre-recorded video files, making it versatile 
+for testing and deployment. 
 """
 
 import cv2
@@ -70,7 +74,7 @@ class WebcamStream:
 if __name__ == "__main__":
     # Test script of the module
     try:
-        with WebcamStream(camera_index=0) as cam:
+        with WebcamStream(source=0) as cam:
             while True:
                 success, current_frame = cam.read_frame()
                 if not success:
