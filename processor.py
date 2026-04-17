@@ -50,7 +50,7 @@ class SignalProcessor:
         # ==========================================
         sorted_pixels = np.sort(skin_pixels)
         bottom_trim = int(len(sorted_pixels) * 0.05)
-        top_trim = int(len(sorted_pixels) * 0.10)
+        top_trim = int(len(sorted_pixels) * 0.20)
         
         if bottom_trim > 0 and top_trim > 0:
             pure_skin = sorted_pixels[bottom_trim:-top_trim]
