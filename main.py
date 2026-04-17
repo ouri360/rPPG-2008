@@ -25,7 +25,7 @@ def main():
         fig.tight_layout(pad=4.0)
 
         line1, = ax1.plot([], [], 'g-')
-        ax1.set_title("1. Raw Signal (Trimmed Mean Skin)")
+        ax1.set_title("1. Raw Signal (Green Channel)")
         ax1.set_ylabel("Amplitude")
 
         line2, = ax2.plot([], [], 'b-')
@@ -65,13 +65,13 @@ def main():
             if is_live:
                 timestamp = time.time() 
             else:
-                # Use the exact time the camera physically took the picture
+                # Use the exact time the camera physically took the picture (need GT file)
                 if frame_counter - 1 < len(gt_reader.timestamps):
                     timestamp = float(gt_reader.timestamps[frame_counter - 1])
                 else:
                     timestamp = frame_counter / cam.fps # Fallback if GT ends
 
-            # 1. ALWAYS Run Facial Extraction (Extremely fast, maintains perfect resolution)
+            # 1. ALWAYS Run Facial Extraction
             rois = detector.get_face_mesh_rois(frame)
 
             if rois:
@@ -94,7 +94,7 @@ def main():
             fps = processor.get_current_fps()
             cv2.putText(frame, f"FPS: {fps:.1f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-            # Draw the cached BPM so the screen doesn't flicker
+            # Draw the cached BPM
             if last_calculated_bpm is not None:
                 cv2.putText(frame, f"Est BPM: {last_calculated_bpm:.1f}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
             else:

@@ -1,85 +1,125 @@
-# 🫀 rPPG-2008: Real-Time Remote Photoplethysmography for NVIDIA Jetson Nano
+# sota-pos-rppg
 
-![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
-![OpenCV](https://img.shields.io/badge/OpenCV-4.x-green)
-![SciPy](https://img.shields.io/badge/SciPy-DSP-red)
-![Platform](https://img.shields.io/badge/Platform-PC%20%7C%20Jetson%20Nano-lightgrey)
+> Real-time, contactless Heart Rate estimation using pure POS matrix mathematics — no black boxes, no neural nets.
 
-An optimized, real-time implementation of the foundational remote photoplethysmography (rPPG) method proposed by [Verkruysse et al. (2008)](https://pmc.ncbi.nlm.nih.gov/articles/PMC2717852/). 
-
-This project extracts a human heart rate (BPM) from a standard webcam feed using computer vision and digital signal processing. It is specifically architected for **Edge AI environments** (e.g., Nvidia Jetson Nano), featuring robust noise reduction, memory-efficient rolling buffers, and a decoupled object-oriented design.
+![Python](https://img.shields.io/badge/Python-3.x-3776AB?style=flat-square&logo=python&logoColor=white)
+![OpenCV](https://img.shields.io/badge/OpenCV-4.9.x-5C3EE8?style=flat-square&logo=opencv&logoColor=white)
+![MediaPipe](https://img.shields.io/badge/MediaPipe-0.10.21-FF6F00?style=flat-square)
+![License](https://img.shields.io/badge/License-Research%20Only-lightgrey?style=flat-square)
 
 ---
 
-## ⚙️ Core Pipeline & DSP Architecture
+## Overview
 
-While based on the 2008 paper, this implementation introduces several modern DSP upgrades to make the system robust under real-world lighting and motion conditions:
+This repository is a professional-grade, real-time Python pipeline for contactless Heart Rate (HR) estimation using standard webcams or pre-recorded video datasets.
 
-1. **Hardware Locking:** Disables webcam Auto-Exposure and Auto-White Balance to prevent artificial signal spikes.
-2. **Facial Tracking (Viola-Jones):** Uses OpenCV Haar Cascades with **Exponential Moving Average (EMA) smoothing** on the bounding box to eliminate high-frequency spatial jitter.
-3. **Signal Extraction:** Isolates the Regions of Interest (ROIs) : Forehead, left cheek and right cheek, and calculates the spatial average of the **Green Channel** (where hemoglobin absorption is highest) into a rolling time-series buffer. The forehead value is weighted higher than the cheeks value since it is the most precise region for rPPG methods. 
-4. **Pre-Processing (Detrending):** Applies linear detrending to eliminate baseline wander caused by slow postural movements or ambient light shifts, preventing IIR filter ringing.
-5. **The `scipy.signal` Toolkit (Filtering & Frequency Analysis):**
-   - **`butter()`**: Designs an infinite impulse response (IIR) Butterworth filter (Bandpass 0.7 Hz - 3.0 Hz). Returns the numerator and denominator coefficients of the filter's transfer function.
-   - **`filtfilt()`**: Applies the filter forward, then backward. Standard real-time filters introduce a phase shift (delaying the signal). `filtfilt` cancels out this phase shift, keeping data perfectly aligned in time.
-   - **`welch()`**: Instead of computing a raw FFT (which is highly susceptible to random noise spikes), Welch's method splits the signal into overlapping segments, computes the periodogram for each, and averages them. For an autonomous, unmonitored system that needs to be robust against real-world noise, Welch's method is the industry standard.
+It implements a highly optimized, strictly mathematical version of the **POS (Plane-Orthogonal-to-Skin)** algorithm ([Wang et al., 2016](#references)). By treating the human face as a multi-channel RGB sensor, the pipeline computationally isolates the diffuse reflection of the cardiovascular pulse wave while mathematically annihilating specular glare, ambient lighting flicker, and motion artifacts.
 
 ---
 
-## 🗂️ Project Structure
+## Features
 
-The architecture is strictly modular to separate hardware interfacing, vision processing, and mathematical analysis.
+### Strict POS Matrix Mathematics
+Implements pure POS projection with Overlap-Add (OLA) stitching and *Inner Flat Slicing* to completely eliminate edge-amplification noise prior to detrending.
 
-```text
-rPPG-2008/
-│
-├── camera.py        # Hardware interface (WebcamStream context manager)
-├── detector.py      # Vision processing (FaceDetector & EMA ROI smoothing)
-├── processor.py     # DSP math (SignalProcessor, Butterworth, Welch's PSD)
-├── main.py          # Entry point & Matplotlib visualization dashboard
-└── README.md
+### Dynamic Area-Weighted Super Masks
+Uses MediaPipe Convex Hulls to map dense vascular regions (forehead, cheeks). RGB channels are extracted via a unified area-weighted mean, preventing "Boiling Mask" quantization jitter on compressed MP4s.
+
+### Hardware-Level V4L2 Locking
+Bypasses the GStreamer middleware to interface directly with the Linux Kernel, forcefully disabling Auto-Exposure, Auto-White Balance, and Auto-Focus — eliminating the 2.5–3.0 Hz synthetic noise trap caused by camera firmware hunting.
+
+### Decoupled Asynchronous Processing
+The Matplotlib GUI and heavy FFT computations are strictly decoupled, running every 15 frames. This unblocks the Python GIL, allowing the camera loop and spatial extraction to maintain a stable 30 FPS.
+
+### Context-Aware, VFR-Immune Timelines
+- **Live mode** — uses the atomic system clock (`time.time()`) to guard against dropped frames.
+- **Dataset mode** — parses exact microsecond ground truth arrays (UBFC-rPPG) and reconstructs Variable Frame Rate MP4s onto a perfect 30 Hz grid via linear interpolation.
+
+---
+
+## Architecture
+
+| File | Responsibility |
+|------|---------------|
+| `main.py` | Decoupled orchestrator. Manages the async processing loop and the 3-panel Matplotlib dashboard. |
+| `processor.py` | DSP engine. Handles time-grid interpolation, POS projections, OLA stitching, and Butterworth bandpass filtering (0.7–3.0 Hz). |
+| `detector.py` | Spatial extractor. Uses MediaPipe Face Mesh to dynamically track high-density vascular landmarks without arbitrary temporal smoothing. |
+| `webcam.py` | Hardware wrapper. Executes V4L2 parameter locks to guarantee a stable, dumb-sensor video feed. |
+| `gt.py` | Dataset parser. Synchronizes UBFC-rPPG pulse oximeter ground truth files with the video feed. |
+| `check.py` | Environment validator. Verifies the "Golden Stack" dependencies to prevent C-API and dependency crashes. |
+
+---
+
+## Installation
+
+This pipeline relies on precise memory management and underlying C-APIs. A specific **"Golden Stack"** of dependencies is required.
+
+> ⚠️ **Do not use NumPy 2.x+** — it breaks the MediaPipe 0.10.x backend.
+
+**1. Clone the repository**
+```bash
+git clone https://github.com/yourusername/pos-rppg-2026.git
+cd pos-rppg-2026
 ```
 
+**2. Install exact dependencies**
+```bash
+pip install numpy==1.26.4 opencv-python==4.9.0.80 mediapipe==0.10.21 scipy matplotlib scikit-learn
+```
+
+**3. Validate your environment**
+```bash
+python check.py
+```
+Expect a fully green output before proceeding.
+
 ---
 
-## 🚀 Installation & Setup
-**Dependencies**
+## Usage
 
-The project relies on the following standard and third-party libraries:
+### Live Webcam
 
-    Core: cv2 (OpenCV), numpy, scipy, matplotlib.pyplot
-
-    Standard Python: logging, time, collections (deque), typing (Tuple, Optional, List)
-
-**Option A: Standard PC / Laptop (Prototyping)**
-
-For Windows/macOS/Linux x86 machines:
-```text
-git clone [https://github.com/ouri360/rPPG-2008.git](https://github.com/ouri360/rPPG-2008.git)
-cd rPPG-2008
-pip install opencv-python numpy scipy matplotlib
+In `main.py`, set the video source to your camera index:
+```python
+VIDEO_SOURCE = 0
 ```
-**Option B: Nvidia Jetson Nano (Edge Deployment)**
-
-⚠️ **IMPORTANT**: Do not use pip install opencv-python on the Jetson Nano, as it will overwrite Nvidia's hardware-accelerated JetPack binaries. Use the apt package manager for heavy math libraries on ARM64 architectures.
-```text
-git clone [https://github.com/ouri360/rPPG-2008.git](https://github.com/ouri360/rPPG-2008.git)
-cd rPPG-2008
-sudo apt-get update
-sudo apt-get install python3-scipy python3-numpy python3-matplotlib
-```
----
-
-## 💻 Usage
-
-Run the main pipeline:
-```text
+Then run:
+```bash
 python main.py
 ```
-**The `DEBUG_MODE` Flag**
 
-At the top of main.py, you will find a DEBUG_MODE boolean used to manage CPU resources depending on your hardware:
+### UBFC-rPPG Dataset
 
-    DEBUG_MODE = True: (Recommended for PC) Launches a 3-panel live Matplotlib dashboard alongside the webcam feed, visualizing the Raw Signal, the Filtered Signal, and the Welch Frequency Spectrum.
+Download a subject from the [UBFC-rPPG dataset](https://sites.google.com/view/ybenezeth/ubfcrppg) and point the pipeline to its files:
+```python
+VIDEO_SOURCE = "dataset/vid_subject1.mp4"
+GT_FILE      = "dataset/gt_subject1.txt"
+```
+Then run:
+```bash
+python main.py
+```
+The dashboard will plot predicted HR against the medical ground truth in real time.
 
-    DEBUG_MODE = False: (Recommended for Jetson Nano) Disables the heavy Matplotlib GUI to preserve CPU cycles for DSP calculations. The BPM is rendered directly onto the lightweight OpenCV frame.    
+---
+
+## Dashboard
+
+When `DEBUG_MODE = True`, the application spawns a 3-panel asynchronous Matplotlib dashboard:
+
+| Panel | Description |
+|-------|-------------|
+| **Raw Signal** | Normalized, temporally uniform 1D projection of the skin-tone channels. |
+| **Filtered Signal** | Fully detrended and bandpass-filtered (0.7–3.0 Hz) time-domain pulse wave. |
+| **Power Spectrum** | High-resolution FFT with peak detection, isolating the dominant physiological frequency. |
+
+---
+
+## References
+
+- Wang, W., den Brinker, A. C., Stuijk, S., & de Haan, G. (2016). Algorithmic principles of remote PPG. *IEEE Transactions on Biomedical Engineering*, 64(7), 1479–1491.
+- Bobbia, S., Macwan, R., Benezeth, Y., Mansouri, A., & Dubois, J. (2019). Unsupervised skin tissue segmentation for remote photoplethysmography. *Pattern Recognition Letters*, 124, 82–90. *(UBFC-rPPG Dataset)*
+
+---
+
+> **Disclaimer:** This software is intended for research and educational purposes only. It is not designed or validated for medical diagnosis or clinical use.

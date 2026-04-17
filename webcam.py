@@ -3,6 +3,7 @@ Webcam Streaming module with OpenCV library.
 ---------------------------------------
 This module provides a robust interface for capturing video frames from a USB webcam using OpenCV.
 It includes error handling for hardware issues and ensures proper resource management.
+It also attempts to lock camera parameters (exposure, white balance, focus) for consistent rPPG signal quality.
 """
 
 import cv2

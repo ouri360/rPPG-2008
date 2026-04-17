@@ -2,8 +2,7 @@
 FaceDetector Module (MediaPipe Edition with Landmark Smoothing)
 ---------------------------------------
 Replaces rigid Haar Cascades with dynamic, shape-shifting ML polygons.
-Guarantees 100% skin extraction and applies heavy temporal smoothing 
-to the individual landmarks to completely eradicate micro-jitter.
+Guarantees 100% skin extraction to the individual landmarks.
 """
 
 import cv2
@@ -24,23 +23,23 @@ class FaceDetector:
         )
         
         # ==========================================
-        # DSP UPGRADE: Ultra-Tight Vascular Landmarks
+        # Tight Vascular Landmarks
         # Strictly avoids hairlines, eyebrows, and smile lines.
         # ==========================================
         self.ROI_INDICES = {
-            # Forehead: Slightly wider and lower.
+            # Forehead: 
             # Top edge: 67, 10, 297. 
             # Bottom edge: 299, 9, 69.
             'forehead': [67, 10, 297, 299, 9, 69],
             
-            # Left Cheek: Unchanged.
+            # Left Cheek.
             'left_cheek': [117, 118, 101, 36, 205, 50],
             
-            # Right Cheek: Unchanged.
+            # Right Cheek.
             'right_cheek': [346, 347, 330, 266, 425, 280]
         }
         
-        logging.info("FaceDetector initialized with Jitter-Free ML Face Mesh.")
+        logging.info("FaceDetector initialized with ML Face Mesh.")
 
     def get_face_mesh_rois(self, frame: np.ndarray) -> Optional[Dict[str, np.ndarray]]:
         """
@@ -67,7 +66,7 @@ class FaceDetector:
                 raw_x = pt.x * w
                 raw_y = pt.y * h
                 
-                # Append directly to the polygon without EMA/History smoothing
+                # Append directly to the polygon
                 points.append([int(raw_x), int(raw_y)])
                 
             # Convert to a formatted NumPy array

@@ -2,8 +2,8 @@
 SignalProcessor Module for rPPG Signal Extraction (POS Upgraded)
 ---------------------------------------
 This module handles the extraction, filtering, and buffering of the raw rPPG signal.
-It utilizes the state-of-the-art POS (Plane-Orthogonal-to-Skin) algorithm 
-to mathematically annihilate ambient lighting flicker and motion artifacts.
+It utilizes the POS (Plane-Orthogonal-to-Skin) algorithm 
+to mathematically reduce ambient lighting flicker and motion artifacts.
 """
 
 import numpy as np
