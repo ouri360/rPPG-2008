@@ -1,4 +1,4 @@
-# sota-pos-rppg
+# pos-rppg-2008
 
 > Real-time, contactless Heart Rate estimation using pure POS matrix mathematics — no black boxes, no neural nets.
 
