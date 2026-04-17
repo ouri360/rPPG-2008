@@ -12,6 +12,7 @@ from webcam import WebcamStream
 from detector import FaceDetector
 from processor import SignalProcessor
 from gt import GroundTruthReader
+import time
 
 DEBUG_MODE = True
 
@@ -46,10 +47,12 @@ def main():
         ax3.set_xlabel("Frequency (Hz)")
         ax3.set_ylabel("Power")
 
-    VIDEO_SOURCE = "dataset/subject1.mp4" # Or set to "dataset/subject1.mp4"
+    VIDEO_SOURCE = 0 # Or set to "dataset/subject1.mp4"
     GT_FILE = "dataset/gt_subject1.txt"
     # Initialize the Ground Truth Reader
     gt_reader = GroundTruthReader(GT_FILE)
+    
+    is_live = isinstance(VIDEO_SOURCE, int)
 
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         
@@ -66,10 +69,14 @@ def main():
 
             frame_counter += 1
 
-            # ==================================================
-            # Completely prevents "Clock Beating" and 1Hz interpolation harmonics
-            # ==================================================
-            timestamp = frame_counter / cam.fps
+            if is_live:
+                timestamp = time.time() 
+            else:
+                # Use the exact time the camera physically took the picture
+                if frame_counter - 1 < len(gt_reader.timestamps):
+                    timestamp = float(gt_reader.timestamps[frame_counter - 1])
+                else:
+                    timestamp = frame_counter / cam.fps # Fallback if GT ends
 
             face_box = detector.detect_largest_face(frame)
 
