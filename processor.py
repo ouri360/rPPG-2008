@@ -10,6 +10,7 @@ and estimating the heart rate using frequency analysis.
 
 import numpy as np
 import logging
+import cv2
 from collections import deque
 from typing import Tuple, Optional
 from scipy.signal import butter, filtfilt, firwin, sosfiltfilt, detrend
@@ -37,6 +38,7 @@ class SignalProcessor:
             target_fps (int): Expected framerate of the camera.
         """
         self.target_fps = target_fps
+        self.buffer_seconds = buffer_seconds
         # Calculate maximum buffer size
         self.max_length = int(buffer_seconds * target_fps)
         
@@ -58,39 +60,27 @@ class SignalProcessor:
         logging.info(f"SignalProcessor initialized with a {buffer_seconds}-second buffer.")
 
     def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict, timestamp: float) -> None:
-        """
-        Calculates a weighted spatial average from multiple ROIs.
-        """
-        # Define the weights (must sum to 1.0)
-        weights = {
-            'forehead': 0.60,
-            'left_cheek': 0.20,
-            'right_cheek': 0.20
-        }
+        b_channel, g_channel, r_channel = cv2.split(frame)
+        master_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
         
-        sum_r, sum_g, sum_b = 0.0, 0.0, 0.0
-        
-        for region_name, box in rois.items():
-            x, y, w, h = box
-            if y+h > frame.shape[0] or x+w > frame.shape[1]:
-                continue
-
-            cropped_roi = frame[y:y+h, x:x+w]
+        # Area-Weighted Super Mask
+        for region_name, polygon in rois.items():
+            cv2.fillPoly(master_mask, [polygon], 255)
             
-            # OpenCV is BGR (Blue=0, Green=1, Red=2)
-            b_mean = float(np.mean(cropped_roi[:, :, 0]))
-            g_mean = float(np.mean(cropped_roi[:, :, 1]))
-            r_mean = float(np.mean(cropped_roi[:, :, 2]))
-            
-            sum_b += b_mean * weights[region_name]
-            sum_g += g_mean * weights[region_name]
-            sum_r += r_mean * weights[region_name]
-
-        # Append to our 3 separate color buffers
-        self.raw_b.append(sum_b)
-        self.raw_g.append(sum_g)
-        self.raw_r.append(sum_r)
+        r_pixels = r_channel[master_mask == 255]    
+        g_pixels = g_channel[master_mask == 255]
+        b_pixels = b_channel[master_mask == 255]
         
+        if len(g_pixels) > 0:
+            final_r = float(np.mean(r_pixels))
+            final_g = float(np.mean(g_pixels))
+            final_b = float(np.mean(b_pixels))
+        else:
+            final_r, final_g, final_b = 0.0, 0.0, 0.0
+
+        self.raw_r.append(final_r)
+        self.raw_g.append(final_g)
+        self.raw_b.append(final_b)
         self.timestamps.append(timestamp)
 
     def get_signal_data(self) -> Tuple[np.ndarray, np.ndarray]:
@@ -108,9 +98,17 @@ class SignalProcessor:
         g = np.array(list(self.raw_g))
         b = np.array(list(self.raw_b))
         
-        if len(ts) < 2: return None, None
+        time_limit = ts[-1] - self.buffer_seconds
+        valid_indices = np.where(ts >= time_limit)[0]
+        
+        r = r[valid_indices]
+        g = g[valid_indices]
+        b = b[valid_indices]
+        ts = ts[valid_indices]
+        
+        if len(ts) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
+            return None
 
-        # 1. Uniform Resampling
         dt = 1.0 / self.target_fps
         t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
         
@@ -118,15 +116,12 @@ class SignalProcessor:
         g_uni = np.interp(t_uniform, ts, g)
         b_uni = np.interp(t_uniform, ts, b)
         
-        # 2. Detrend and Normalize (Crucial for Poh 2010)
         r_norm = self.detrend_and_normalize(r_uni)
         g_norm = self.detrend_and_normalize(g_uni)
         b_norm = self.detrend_and_normalize(b_uni)
         
-        # 3. Stack into a matrix
         X = np.column_stack((r_norm, g_norm, b_norm))
         
-        # 4. Apply FastICA
         try:
             import warnings
             with warnings.catch_warnings():
@@ -136,30 +131,42 @@ class SignalProcessor:
         except ValueError:
             return None, None
             
-        # ==========================================
-        # POH 2010 EXACT IMPLEMENTATION: 
-        # Always select the second component (index 1)
-        # ==========================================
-        # 1. Generate the FIR filter coefficients
         taps = firwin(
             numtaps=71, 
             cutoff=[LOWCUT_HZ, HIGHCUT_HZ], 
             fs=self.target_fps, 
             pass_zero=False
         )
-
-        # 2. Calculate a safe padding length based on the current signal size
-        # SciPy requires padlen to be STRICTLY LESS than the length of the input vector
         safe_padlen = min(4 * len(taps), len(g_uni) - 1)
         
         all_filtered_components = []
+        max_power = -1.0
+        best_component_idx = 0
+        
+        # ==========================================
+        # DSP UPGRADE: Dynamic Component Selection
+        # We find the component with the strongest physiological heartbeat.
+        # ==========================================
         for i in range(3):
-            # Apply the bandpass filter to all components so they can be plotted
             filtered_comp = filtfilt(taps, 1.0, S[:, i], padlen=safe_padlen)
             all_filtered_components.append(filtered_comp)
             
-        # Strictly select the second component (index 1)
-        best_component = all_filtered_components[1]
+            # Mini-FFT to find the dominant physiological power
+            window = np.hanning(len(filtered_comp))
+            fft_res = np.fft.rfft(filtered_comp * window, n=NFFT)
+            power = np.abs(fft_res)**2
+            freqs = np.fft.rfftfreq(NFFT, d=1.0/self.target_fps)
+            
+            # Look only in the human heart rate band
+            valid_band = np.where((freqs >= LOWCUT_HZ) & (freqs <= HIGHCUT_HZ))[0]
+            peak_power_in_band = np.max(power[valid_band])
+            
+            # Keep track of the component with the highest peak power
+            if peak_power_in_band > max_power:
+                max_power = peak_power_in_band
+                best_component_idx = i
+                
+        best_component = all_filtered_components[best_component_idx]
                 
         return best_component, all_filtered_components
     
