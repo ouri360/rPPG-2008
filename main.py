@@ -12,6 +12,7 @@ from webcam import WebcamStream
 from detector import FaceDetector
 from processor import SignalProcessor
 from gt import GroundTruthReader
+import time
 
 DEBUG_MODE = True
 
@@ -44,12 +45,11 @@ def main():
     GT_FILE = "dataset/gt_subject1.txt" 
     
     gt_reader = GroundTruthReader(GT_FILE)
+    is_live = isinstance(VIDEO_SOURCE, int)
     
-    # 30-second buffer for maximum frequency resolution!
-    processor = SignalProcessor(buffer_seconds=30, target_fps=30.0)
-
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         frame_counter = 0
+        processor = SignalProcessor(buffer_seconds=30, target_fps=cam.fps)
 
         while True:
             success, frame = cam.read_frame()
@@ -58,8 +58,14 @@ def main():
 
             frame_counter += 1
             
-            # 100% Synthetic Flawless Timeline
-            timestamp = frame_counter / cam.fps
+            if is_live:
+                timestamp = time.time() 
+            else:
+                # Use the exact time the camera physically took the picture
+                if frame_counter - 1 < len(gt_reader.timestamps):
+                    timestamp = float(gt_reader.timestamps[frame_counter - 1])
+                else:
+                    timestamp = frame_counter / cam.fps # Fallback if GT ends
 
             # ==================================================
             # 1. ML FACE MESHING & SIGNAL EXTRACTION
