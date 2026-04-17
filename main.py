@@ -37,10 +37,12 @@ def main():
         ax3.set_xlabel("Frequency (Hz)")
         ax3.set_ylabel("Power")
 
-    VIDEO_SOURCE = 0 
+    VIDEO_SOURCE = 0  # Change to 0 for webcam input
     GT_FILE = "dataset/gt_subject1.txt" 
     
     gt_reader = GroundTruthReader(GT_FILE)
+    # Check if the source is an integer (Webcam) or a string (Video Path)
+    is_live = isinstance(VIDEO_SOURCE, int)
     
     # ==========================================
     # Display Caching Variables
@@ -51,7 +53,7 @@ def main():
     
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         frame_counter = 0
-        processor = SignalProcessor(buffer_seconds=30, target_fps=cam.fps) # Fixed to 30s!
+        processor = SignalProcessor(buffer_seconds=30, target_fps=cam.fps)
 
         while True:
             success, frame = cam.read_frame()
@@ -59,7 +61,15 @@ def main():
                 break
 
             frame_counter += 1
-            timestamp = time.time() # True physical timeline
+
+            if is_live:
+                timestamp = time.time() 
+            else:
+                # Use the exact time the camera physically took the picture
+                if frame_counter - 1 < len(gt_reader.timestamps):
+                    timestamp = float(gt_reader.timestamps[frame_counter - 1])
+                else:
+                    timestamp = frame_counter / cam.fps # Fallback if GT ends
 
             # 1. ALWAYS Run Facial Extraction (Extremely fast, maintains perfect resolution)
             rois = detector.get_face_mesh_rois(frame)
@@ -70,8 +80,8 @@ def main():
                     cv2.polylines(frame, [polygon], isClosed=True, color=(0, 255, 0), thickness=2)
 
             # ==================================================
-            # DSP UPGRADE: Asynchronous Heavy Math
-            # Only run the brutal POS Loop and FFT every 15 frames!
+            # Asynchronous Heavy Math
+            # Only run the POS Loop and FFT every 15 frames
             # ==================================================
             if frame_counter % 15 == 0:
                 bpm, freqs, filt_mag = processor.estimate_heart_rate()

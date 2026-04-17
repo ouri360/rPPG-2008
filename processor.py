@@ -43,48 +43,32 @@ class SignalProcessor:
         self.last_valid_bpm = None
         
         logging.info("SignalProcessor using to POS RGB Architecture.")
-
+    
     def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict, timestamp: float) -> float:
-        weights = {
-            'forehead': 0.60,
-            'left_cheek': 0.20,
-            'right_cheek': 0.20
-        }
-        
-        weighted_r = 0.0
-        weighted_g = 0.0
-        weighted_b = 0.0
-        
-        # Extract all three color channels (OpenCV uses BGR order)
         b_channel, g_channel, r_channel = cv2.split(frame)
         
-        for region_name, polygon in rois.items():
-            mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-            cv2.fillPoly(mask, [polygon], 255)
-            
-            r_pixels = r_channel[mask == 255]
-            g_pixels = g_channel[mask == 255]
-            b_pixels = b_channel[mask == 255]
-            
-            if len(g_pixels) == 0:
-                continue
-                
-            r_val = float(np.mean(r_pixels))
-            g_val = float(np.mean(g_pixels))
-            b_val = float(np.mean(b_pixels))
-            
-            weighted_r += r_val * weights[region_name]
-            weighted_g += g_val * weights[region_name]
-            weighted_b += b_val * weights[region_name]
-
-        # Push to the RGB buffers
-        self.raw_r.append(weighted_r)
-        self.raw_g.append(weighted_g)
-        self.raw_b.append(weighted_b)
+        master_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
         
+        for region_name, polygon in rois.items():
+            cv2.fillPoly(master_mask, [polygon], 255)
+            
+        r_pixels = r_channel[master_mask == 255]
+        g_pixels = g_channel[master_mask == 255]
+        b_pixels = b_channel[master_mask == 255]
+        
+        if len(g_pixels) > 0:
+            final_r = float(np.mean(r_pixels))
+            final_g = float(np.mean(g_pixels))
+            final_b = float(np.mean(b_pixels))
+        else:
+            final_r, final_g, final_b = 0.0, 0.0, 0.0
+
+        self.raw_r.append(final_r)
+        self.raw_g.append(final_g)
+        self.raw_b.append(final_b)
         self.timestamps.append(timestamp)
 
-        return weighted_g
+        return final_g
 
     def get_signal_data(self) -> Tuple[np.ndarray, np.ndarray]:
         return np.array(self.raw_g), np.array(self.timestamps)
@@ -100,10 +84,25 @@ class SignalProcessor:
         # Timestamps array
         ts = np.array(list(self.timestamps))
 
+        # We enforce exactly a 30-second window, throwing away 
+        # older data even if the camera dropped frames
+        # ==========================================
+        time_limit = ts[-1] - self.buffer_seconds
+        valid_indices = np.where(ts >= time_limit)[0]
+        
+        r = r[valid_indices]
+        g = g[valid_indices]
+        b = b[valid_indices]
+        ts = ts[valid_indices]
+        
+        # If pruning left us with too little data, abort safely
+        if len(ts) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
+            return None
+
         # ==========================================
         # 1. Temporal Resampling
         # POS strictly requires uniform matrices. We interpolate 
-        # the erratic physical frames into a flawless 30Hz grid.
+        # the physical frames into a flawless 30Hz grid.
         # ==========================================
         dt = 1.0 / self.target_fps
         t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
@@ -136,14 +135,19 @@ class SignalProcessor:
             H[n:n+L] += (h - np.mean(h))
             
         # ==========================================
-        # 3. Direct Filtering
+        # 3. Detrending + slicing edges
         # Detrend guarantees a zero-mean, flat DC line so the 
         # Butterworth filter doesn't panic on the Overlap-Add envelope!
         # ==========================================
-        H = detrend(H)
+        H_flat = H[L-1 : -(L-1)]
         
+        if len(H_flat) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
+            return None
+        
+        H_detrended = detrend(H_flat) 
+
         sos = butter(ORDER, [LOWCUT_HZ, HIGHCUT_HZ], btype='bandpass', fs=self.target_fps, output='sos')
-        filtered_signal = sosfiltfilt(sos, H)
+        filtered_signal = sosfiltfilt(sos, H_detrended)
         
         return filtered_signal
     
@@ -170,7 +174,7 @@ class SignalProcessor:
         bpm_freqs = frequencies[bpm_indices]
         bpm_filt_mag = filtered_power[bpm_indices]
         
-        # 4. Pure Argmax Peak Detection
+        # 4. Argmax Peak Detection
         peak_index = np.argmax(bpm_filt_mag)
         raw_bpm = bpm_freqs[peak_index] * 60.0
 
