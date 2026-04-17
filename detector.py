@@ -1,12 +1,11 @@
 """
 FaceDetector Module for rPPG Signal Extraction
 ---------------------------------------
-This module implements a lightweight face detection algorithm using Haar Cascades, 
-optimized for real-time applications in remote photoplethysmography (rPPG). 
-It detects the largest face in the frame and isolates a central region of interest (ROI) to minimize noise from hair, 
-background, and neck movement. The module also includes temporal smoothing of the bounding box to reduce jitter 
-and improve signal stability. It can also isolate specific sub-regions of the face (forehead, left cheek, right cheek) 
-for more targeted signal extraction.
+This module uses MediaPipe's Face Mesh to detect facial landmarks in real-time video frames.
+It defines specific regions of interest (ROIs) on the face, such as the forehead and cheeks, 
+which are commonly used for rPPG signal extraction.
+The get_multi_rois method returns the convex hulls of these regions as polygons, 
+which can be used to mask the video frames and isolate the relevant areas for signal processing.
 """
 
 import cv2
@@ -45,7 +44,7 @@ class FaceDetector:
         for region_name, indices in self.ROI_INDICES.items():
             points = []
             for idx in indices:
-                # Raw, un-smoothed AI coordinates to push noise to 30Hz
+                # Raw, un-smoothed AI coordinates
                 raw_x = landmarks.landmark[idx].x * w
                 raw_y = landmarks.landmark[idx].y * h
                 points.append([int(raw_x), int(raw_y)])

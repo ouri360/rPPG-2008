@@ -43,7 +43,7 @@ class SignalProcessor:
         self.max_length = int(buffer_seconds * target_fps)
         
         # deques automatically pop the oldest item when maxlen is reached
-        # WE NOW NEED 3 BUFFERS FOR RGB!
+        # WE NEED 3 BUFFERS FOR RGB!
         self.raw_r = deque(maxlen=self.max_length)
         self.raw_g = deque(maxlen=self.max_length)
         self.raw_b = deque(maxlen=self.max_length)
@@ -211,7 +211,7 @@ class SignalProcessor:
         self.bpm_buffer.append(raw_bpm)
         smoothed_bpm = sum(self.bpm_buffer) / len(self.bpm_buffer)
         
-        # Return the selected_component so your matplotlib dashboard updates correctly
+        # Return the selected_component so the matplotlib dashboard updates correctly
         return smoothed_bpm, plot_freqs, plot_filt_mag, selected_component, all_components
     
     def get_current_fps(self) -> float:
