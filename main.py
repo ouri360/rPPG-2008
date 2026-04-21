@@ -66,11 +66,8 @@ def main():
             if is_live:
                 timestamp = time.time() 
             else:
-                if frame_counter - 1 < len(gt_reader.timestamps):
-                    timestamp = float(gt_reader.timestamps[frame_counter - 1])
-                else:
-                    timestamp = frame_counter / cam.fps 
-
+                timestamp = frame_counter / cam.fps 
+                    
             # Spatial Extraction (Runs every frame)
             multi_rois = detector.get_multi_rois(frame)
 

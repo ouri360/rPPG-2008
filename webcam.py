@@ -24,7 +24,7 @@ class WebcamStream:
         if isinstance(self.source, int):
             self.cap = cv2.VideoCapture(self.source, cv2.CAP_V4L2)
         else:
-            self.cap = cv2.VideoCapture(self.source)
+            self.cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
         
         if not self.cap.isOpened():
             raise RuntimeError(f"Critical Error: Could not open video source: {self.source}.")
