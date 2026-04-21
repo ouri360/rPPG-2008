@@ -59,14 +59,14 @@ def main():
 
             frame_counter += 1
             
+            # Independent Hardware Timelines
+            # Live webcams use the physical CPU clock.
+            # Video files use the synthetic CFR video timeline.
+            # ==========================================
             if is_live:
                 timestamp = time.time() 
             else:
-                # Use the exact time the camera physically took the picture
-                if frame_counter - 1 < len(gt_reader.timestamps):
-                    timestamp = float(gt_reader.timestamps[frame_counter - 1])
-                else:
-                    timestamp = frame_counter / cam.fps # Fallback if GT ends
+                timestamp = frame_counter / cam.fps 
 
             # ==================================================
             # 1. ML FACE MESHING & SIGNAL EXTRACTION
