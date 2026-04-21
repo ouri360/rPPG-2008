@@ -1,13 +1,14 @@
 """
 GroundTruthReader Module
 ---------------------------------------
-Parses ground truth data from various datasets (UBFC-rPPG .txt, UBFC-Phys .csv, and UBFC .xmp)
+Parses ground truth data from various datasets (UBFC-rPPG, UBFC-Phys)
 and synchronizes the medical sensor's Heart Rate with the video timeline.
 """
 
 import numpy as np
 import logging
 import os
+from scipy.signal import butter, filtfilt, find_peaks
 
 class GroundTruthReader:
     def __init__(self, filepath: str):
@@ -19,16 +20,23 @@ class GroundTruthReader:
             logging.error(f"Ground truth file not found: {filepath}")
             return
 
+        filename_lower = os.path.basename(filepath).lower()
+
         # ==========================================
         # DSP UPGRADE: Multi-Dataset Auto-Parser
-        # Automatically routes the correct parsing logic based on the extension!
+        # Routes the parsing logic based on the file type and sensor type!
         # ==========================================
         if filepath.endswith('.txt'):
             self._parse_ubfc_rppg(filepath)
-        elif filepath.endswith('.csv'):
-            self._parse_empatica_csv(filepath)
         elif filepath.endswith('.xmp'):
             self._parse_ubfc_xmp(filepath)
+        elif filepath.endswith('.csv'):
+            if 'bvp' in filename_lower:
+                self._parse_empatica_bvp(filepath)
+            elif 'eda' in filename_lower:
+                logging.error("CRITICAL: eda.csv measures sweat (Electrodermal Activity), not Heart Rate! Please point to bvp.csv.")
+            else:
+                self._parse_empatica_csv(filepath) # Fallback if HR.csv exists
         else:
             logging.error(f"Unsupported file format: {filepath}")
 
@@ -46,30 +54,73 @@ class GroundTruthReader:
     def _parse_ubfc_xmp(self, filepath: str):
         """Parses the hidden CSV format inside the UBFC .xmp files."""
         try:
-            # Data format: Time(ms), HR(bpm), SpO2(%), PPG_Signal
             data = np.loadtxt(filepath, delimiter=',')
-            
-            # Convert timestamps from milliseconds to seconds
             self.timestamps = data[:, 0] / 1000.0
             self.gt_hr = data[:, 1]
             self.gt_signal = data[:, 3]
-            
             logging.info(f"Loaded UBFC .xmp Ground Truth: {len(self.timestamps)} medical sensor readings found.")
         except Exception as e:
             logging.error(f"Failed to load UBFC .xmp file: {e}")
 
+    def _parse_empatica_bvp(self, filepath: str):
+        """
+        Parses raw Blood Volume Pulse (bvp.csv) from Empatica E4 
+        and dynamically calculates the true BPM using Peak Detection.
+        """
+        try:
+            # ==========================================
+            # DSP UPGRADE: UBFC-Phys BVP Fix
+            # The researchers stripped the metadata headers.
+            # The file is pure data sampled at the Empatica E4 standard of 64 Hz.
+            # ==========================================
+            bvp_signal = np.loadtxt(filepath, delimiter=',')
+            hz = 64.0  # Hardcoded Empatica E4 sensor frequency
+            
+            # 1. Clean the raw wrist BVP signal (Bandpass 0.7 - 3.0 Hz)
+            b, a = butter(2, [0.7, 3.0], btype='bandpass', fs=hz)
+            clean_bvp = filtfilt(b, a, bvp_signal)
+            
+            # 2. Sliding window to calculate BPM (8-second window, 1-second stride)
+            window_sec = 8
+            stride_sec = 1
+            window_pts = int(window_sec * hz)
+            stride_pts = int(stride_sec * hz)
+            
+            hr_list = []
+            ts_list = []
+            
+            for i in range(0, len(clean_bvp) - window_pts, stride_pts):
+                window = clean_bvp[i : i + window_pts]
+                
+                # Minimum distance between peaks: 0.33 seconds (max 180 BPM)
+                peaks, _ = find_peaks(window, distance=hz*0.33) 
+                
+                if len(peaks) >= 2:
+                    ibis = np.diff(peaks) / hz # Calculate Inter-Beat Intervals
+                    bpm = 60.0 / np.mean(ibis)
+                else:
+                    bpm = hr_list[-1] if len(hr_list) > 0 else 70.0 # Fallback
+                    
+                hr_list.append(bpm)
+                # Assign the calculated HR to the exact middle of the window
+                ts_list.append((i + (window_pts / 2)) / hz)
+                
+            self.timestamps = np.array(ts_list)
+            self.gt_hr = np.array(hr_list)
+            
+            logging.info(f"Loaded UBFC-Phys BVP: Dynamically calculated {len(self.gt_hr)} True HR points from raw wrist optical data at {hz} Hz.")
+        except Exception as e:
+            logging.error(f"Failed to process BVP file: {e}")
+
     def _parse_empatica_csv(self, filepath: str):
-        """Parses the Empatica E4 HR.csv file from the UBFC-Phys dataset."""
+        """Parses the Empatica E4 HR.csv file (If available)."""
         try:
             data = np.loadtxt(filepath, delimiter=',')
-            start_time = data[0]
             hz = data[1]
             hr_data = data[2:]
-            
             self.timestamps = np.arange(len(hr_data)) / hz
             self.gt_hr = hr_data
-            
-            logging.info(f"Loaded UBFC-Phys (Empatica) Ground Truth: {len(self.timestamps)} readings at {hz} Hz.")
+            logging.info(f"Loaded UBFC-Phys pre-calculated HR: {len(self.timestamps)} readings at {hz} Hz.")
         except Exception as e:
             logging.error(f"Failed to load Empatica .csv file: {e}")
 
@@ -78,16 +129,13 @@ class GroundTruthReader:
         if len(self.timestamps) == 0 or len(self.gt_hr) == 0:
             return None
             
-        # Blazing-fast binary search
         idx = np.searchsorted(self.timestamps, current_time)
         
-        # Handle edges
         if idx == 0:
             return self.gt_hr[0]
         if idx >= len(self.timestamps):
             return self.gt_hr[-1]
             
-        # Interpolate closest value
         left_time = self.timestamps[idx - 1]
         right_time = self.timestamps[idx]
         
