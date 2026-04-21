@@ -37,8 +37,8 @@ def main():
         ax3.set_xlabel("Frequency (Hz)")
         ax3.set_ylabel("Power")
 
-    VIDEO_SOURCE = 0  # Change to 0 for webcam input
-    GT_FILE = "dataset/gt_subject1.txt" 
+    VIDEO_SOURCE = "dataset/vid_subject8.avi"  # Change to 0 for webcam input
+    GT_FILE = "dataset/gt_subject8.xmp" 
     
     gt_reader = GroundTruthReader(GT_FILE)
     # Check if the source is an integer (Webcam) or a string (Video Path)
