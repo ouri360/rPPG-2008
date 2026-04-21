@@ -68,10 +68,13 @@ class GroundTruthReader:
         and dynamically calculates the true BPM using Peak Detection.
         """
         try:
-            # Empatica BVP format: Row 0 = Start Time, Row 1 = Hz, Row 2+ = Raw PPG Signal
-            data = np.loadtxt(filepath, delimiter=',')
-            hz = data[1]
-            bvp_signal = data[2:]
+            # ==========================================
+            # DSP UPGRADE: UBFC-Phys BVP Fix
+            # The researchers stripped the metadata headers.
+            # The file is pure data sampled at the Empatica E4 standard of 64 Hz.
+            # ==========================================
+            bvp_signal = np.loadtxt(filepath, delimiter=',')
+            hz = 64.0  # Hardcoded Empatica E4 sensor frequency
             
             # 1. Clean the raw wrist BVP signal (Bandpass 0.7 - 3.0 Hz)
             b, a = butter(2, [0.7, 3.0], btype='bandpass', fs=hz)
