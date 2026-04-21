@@ -70,10 +70,10 @@ def calculate_metrics(df: pd.DataFrame, output_csv: str):
 
 def main():
     # --- CONFIGURATION ---
-    VIDEO_SOURCE = "dataset/vid_subject5.avi"       # Point this to your UBFC video
-    GT_FILE = "dataset/gt_subject5.xmp"    # Point this to your UBFC ground truth
-    OUTPUT_CSV = "dataset/results/benchmark_results_subject5_ICA.csv"
-    WARMUP_SECONDS = 40.0                  # Ignore the first 40 seconds
+    VIDEO_SOURCE = "dataset/vid_subject1.avi"       # Point this to your UBFC video
+    GT_FILE = "dataset/gt_subject1.txt"    # Point this to your UBFC ground truth
+    OUTPUT_CSV = "dataset/results/benchmark_results_subject1_ICA.csv"
+    WARMUP_SECONDS = 30.0                  # Ignore the first 30 seconds
     # ---------------------
 
     print(f"Starting benchmark on {VIDEO_SOURCE}...")
@@ -98,7 +98,7 @@ def main():
             # Use the CFR synthetic timeline for datasets
             timestamp = frame_counter / cam.fps 
 
-            multi_rois = detector.get_face_mesh_rois(frame)
+            multi_rois = detector.get_multi_rois(frame)
 
             if multi_rois:
                 processor.extract_and_buffer_multi(frame, multi_rois, timestamp)
