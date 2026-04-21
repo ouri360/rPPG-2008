@@ -65,11 +65,7 @@ def main():
             if is_live:
                 timestamp = time.time() 
             else:
-                # Use the exact time the camera physically took the picture (need GT file)
-                if frame_counter - 1 < len(gt_reader.timestamps):
-                    timestamp = float(gt_reader.timestamps[frame_counter - 1])
-                else:
-                    timestamp = frame_counter / cam.fps # Fallback if GT ends
+                timestamp = frame_counter / cam.fps
 
             # 1. ALWAYS Run Facial Extraction
             rois = detector.get_face_mesh_rois(frame)
