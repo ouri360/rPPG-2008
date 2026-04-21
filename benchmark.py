@@ -70,9 +70,9 @@ def calculate_metrics(df: pd.DataFrame, output_csv: str):
 
 def main():
     # --- CONFIGURATION ---
-    VIDEO_SOURCE = "dataset/vid_subject6.avi"       # Point this to your UBFC video
-    GT_FILE = "dataset/gt_subject6.xmp"    # Point this to your UBFC ground truth
-    OUTPUT_CSV = "dataset/results/benchmark_results_subject6_green.csv"
+    VIDEO_SOURCE = "dataset/vid_subject10.avi"       # Point this to your UBFC video
+    GT_FILE = "dataset/gt_subject10.xmp"    # Point this to your UBFC ground truth
+    OUTPUT_CSV = "dataset/results/benchmark_results_subject10_green.csv"
     WARMUP_SECONDS = 40.0                  # Ignore the first 40 seconds
     # ---------------------
 

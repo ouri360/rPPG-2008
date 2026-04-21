@@ -2,11 +2,8 @@
 Webcam Streaming module with OpenCV library.
 ---------------------------------------
 This module provides a robust interface for capturing video frames from a USB webcam using OpenCV.
-It includes error handling for hardware issues and ensures proper resource management,
-such as releasing the camera when done. It also attempts to lock hardware parameters like 
-exposure and white balance for consistent rPPG signal quality. 
-The class supports both live webcam feeds and pre-recorded video files, making it versatile 
-for testing and deployment. 
+It includes error handling for hardware issues and ensures proper resource management.
+It also attempts to lock camera parameters (exposure, white balance, focus) for consistent rPPG signal quality.
 """
 
 import cv2
@@ -28,26 +25,45 @@ class WebcamStream:
             source: int (e.g., 0) for live webcam, or str (e.g., "video.mp4") for a file.
         """
         self.source = source
-        self.cap = cv2.VideoCapture(self.source)
+        
+        # ==========================================
+        # DSP UPGRADE: Explicit V4L2 Backend
+        # Forces OpenCV to talk directly to the Linux Kernel, 
+        # bypassing GStreamer to allow hardware locking without admin rights.
+        # ==========================================
+        if isinstance(self.source, int):
+            self.cap = cv2.VideoCapture(self.source, cv2.CAP_V4L2)
+        else:
+            self.cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)  # Use FFMPEG for video files
         
         if not self.cap.isOpened():
             raise RuntimeError(f"Critical Error: Could not open video source: {self.source}.")
         
-        # Dynamically extract the exact FPS of the video file or camera
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-        # Fallback in case OpenCV fails to read the metadata
         if self.fps == 0 or np.isnan(self.fps):
             self.fps = 30.0 
             logging.warning("Could not read FPS from source. Defaulting to 30.0 FPS.")
 
         logging.info(f"Video source initialized successfully. Operating at {self.fps} FPS.")
 
-        # Only apply hardware locking (Exposure/WB) if the source is a live physical camera (integer)
+        # Attempt strict hardware locking natively via OpenCV V4L2
         if isinstance(self.source, int):
-            logging.info("Live camera detected. Attempting to lock hardware parameters...")
-            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25) 
-            self.cap.set(cv2.CAP_PROP_EXPOSURE, -5)
+            logging.info("Live camera detected. Attempting to lock V4L2 hardware parameters via OpenCV...")
+            
+            # 1 = Manual Exposure, 3 = Auto Exposure
+            self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) 
+            self.cap.set(cv2.CAP_PROP_EXPOSURE, 100) # Adjust if image is too dark/bright
+            
+            # Disable Auto-White Balance
             self.cap.set(cv2.CAP_PROP_AUTO_WB, 0)
+            
+            # Disable Auto-Focus
+            self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 0) 
+            self.cap.set(cv2.CAP_PROP_FOCUS, 0) 
+            
+            # Disable Auto-Gain (if supported by your camera)
+            self.cap.set(cv2.CAP_PROP_GAIN, 0)
+            
             self.cap.set(cv2.CAP_PROP_FPS, 30)
 
     def read_frame(self) -> Tuple[bool, Optional[np.ndarray]]:
