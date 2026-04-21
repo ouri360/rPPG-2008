@@ -20,8 +20,8 @@ from gt import GroundTruthReader
 # Suppress debug logs from the other modules to keep the terminal clean
 logging.getLogger().setLevel(logging.WARNING)
 
-def calculate_metrics(df: pd.DataFrame):
-    """Calculates SOTA academic metrics for rPPG evaluation."""
+def calculate_metrics(df: pd.DataFrame, output_csv: str):
+    """Calculates SOTA academic metrics for rPPG evaluation and appends to CSV."""
     if len(df) == 0:
         print("No data collected. Video might be too short.")
         return
@@ -55,12 +55,24 @@ def calculate_metrics(df: pd.DataFrame):
     print(f"MAPE (Percentage)   : {mape:.2f} %")
     print(f"Pearson (r)         : {pearson_r:.3f}")
     print("="*40)
+    # --- Append to the bottom of the CSV ---
+    with open(output_csv, 'a') as f:
+        f.write("\n")
+        f.write("=== BENCHMARK SUMMARY ===\n")
+        f.write(f"Total Valid Samples,{len(df)}\n")
+        f.write(f"MAE (BPM),{mae:.2f}\n")
+        f.write(f"RMSE (BPM),{rmse:.2f}\n")
+        f.write(f"MAPE (%),{mape:.2f}\n")
+        f.write(f"Pearson (r),{pearson_r:.3f}\n")
+        
+    print(f"✅ Summary metrics successfully appended to {output_csv}")
+
 
 def main():
     # --- CONFIGURATION ---
-    VIDEO_SOURCE = "dataset/vid_subject8.avi"       # Point this to your UBFC video
-    GT_FILE = "dataset/gt_subject8.xmp"    # Point this to your UBFC ground truth
-    OUTPUT_CSV = "dataset/results/benchmark_results_subject8_green.csv"
+    VIDEO_SOURCE = "dataset/vid_subject6.avi"       # Point this to your UBFC video
+    GT_FILE = "dataset/gt_subject6.xmp"    # Point this to your UBFC ground truth
+    OUTPUT_CSV = "dataset/results/benchmark_results_subject6_green.csv"
     WARMUP_SECONDS = 40.0                  # Ignore the first 40 seconds
     # ---------------------
 
@@ -120,7 +132,7 @@ def main():
         print(f"\nRaw data saved to {OUTPUT_CSV}")
         
         # Calculate and print the final SOTA metrics
-        calculate_metrics(df)
+        calculate_metrics(df, OUTPUT_CSV)
     else:
         print("\nBenchmark failed: Not enough data collected. Ensure the video is longer than 40 seconds.")
 
