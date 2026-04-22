@@ -15,72 +15,85 @@ import threading
 import queue
 import numpy as np
 
-from PyQt5.QtWidgets import QApplication, QMainWindow
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout
 from PyQt5.QtCore import QTimer
 import pyqtgraph as pg
 
 from webcam import WebcamStream
 from detector import FaceDetector
 from processor import SignalProcessor
-from gt import GroundTruthReader
 
-# Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+stop_event = threading.Event()
 
 # ==========================================
-# 1. THE GUI CLASS (Runs on Main Thread)
+# 1. THE GUI CLASS (Main Thread)
 # ==========================================
 class RPPGDashboard(QMainWindow):
     def __init__(self, data_queue):
         super().__init__()
-        self.setWindowTitle("rPPG Real-Time Telemetry (Jetson Optimized)")
-        self.resize(800, 900)
+        self.setWindowTitle("rPPG Real-Time Telemetry & Vision")
+        self.resize(1400, 800) # Fenêtre plus large pour le Side-by-Side
         self.data_queue = data_queue
 
-        # Create PyQtGraph layout
+        # Layout Principal: Divisé en deux horizontalement
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        layout = QHBoxLayout(main_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # --- PANNEAU GAUCHE : LA VIDÉO ---
+        self.video_widget = pg.GraphicsLayoutWidget()
+        self.plot_video = self.video_widget.addPlot(title="Live Camera Feed")
+        self.plot_video.hideAxis('bottom')
+        self.plot_video.hideAxis('left')
+        self.img_video = pg.ImageItem(axisOrder='row-major') 
+        self.plot_video.addItem(self.img_video)
+        layout.addWidget(self.video_widget, stretch=1) # Occupe 50% de l'écran
+
+        # --- PANNEAU DROIT : LES GRAPHIQUES ---
         self.graph_widget = pg.GraphicsLayoutWidget()
-        self.setCentralWidget(self.graph_widget)
-        self.graph_widget.setBackground('k')
+        layout.addWidget(self.graph_widget, stretch=1) # Occupe l'autre 50%
 
         # 1. Raw Signal Plot
-        self.plot_raw = self.graph_widget.addPlot(title="1. Raw Signal (Green Channel Average)")
+        self.plot_raw = self.graph_widget.addPlot(title="1. Raw Signal (Green Channel)")
         self.curve_raw = self.plot_raw.plot(pen=pg.mkPen('g', width=2))
-        self.plot_raw.showGrid(x=True, y=True)
         self.graph_widget.nextRow()
 
-        # 2. Filtered Time Signal Plot
+        # 2. Filtered Signal Plot
         self.plot_filt = self.graph_widget.addPlot(title="2. Filtered Signal (Time Domain)")
-        self.curve_filt = self.plot_filt.plot(pen=pg.mkPen('c', width=2)) # Cyan
-        self.plot_filt.showGrid(x=True, y=True)
+        self.curve_filt = self.plot_filt.plot(pen=pg.mkPen('c', width=2))
         self.graph_widget.nextRow()
 
-        # 3. Frequency Spectrum (FFT) Plot
-        self.plot_fft = self.graph_widget.addPlot(title="3. Filtered FFT (Power Spectrum)")
-        self.curve_fft = self.plot_fft.plot(pen=pg.mkPen('m', width=2)) # Magenta
-        self.plot_fft.showGrid(x=True, y=True)
+        # 3. Power Spectrum Plot
+        self.plot_fft = self.graph_widget.addPlot(title="3. Power Spectrum")
+        self.curve_fft = self.plot_fft.plot(pen=pg.mkPen('m', width=2))
         self.plot_fft.setLabel('bottom', "Frequency", units='Hz')
 
-        # Timer to poll the queue safely from the GUI thread without freezing
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_plots)
-        self.timer.start(33) # ~30 FPS GUI update rate
+        self.timer.start(33) 
 
     def update_plots(self):
         try:
-            # Pull the latest telemetry payload from the math thread
             data = self.data_queue.get_nowait()
             
+            if data.get('frame') is not None:
+                self.img_video.setImage(data['frame'], levels=(0, 255))
             if data.get('raw_signal') is not None and len(data['raw_signal']) > 0:
                 self.curve_raw.setData(data['raw_signal'])
-            
             if data.get('filtered_signal') is not None and len(data['filtered_signal']) > 0:
                 self.curve_filt.setData(data['filtered_signal'])
-                
             if data.get('freqs') is not None and data.get('filt_mag') is not None:
                 self.curve_fft.setData(data['freqs'], data['filt_mag'])
                 
         except queue.Empty:
-            pass # No new data, keep displaying the current graphs
+            pass
+
+    def closeEvent(self, event):
+        logging.info("Shutting down safely...")
+        stop_event.set() 
+        event.accept()
 
 
 # ==========================================
@@ -172,8 +185,6 @@ def rppg_processing_thread(data_queue):
                         pass
                     data_queue.put_nowait(payload)
 
-    # Clean up when loop breaks
-    cv2.destroyAllWindows()
     # Tell PyQt to quit nicely
     QApplication.quit()
 

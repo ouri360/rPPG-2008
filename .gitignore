@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 *.pyd
 .venv/
+.venv_old_project/
 env/
 
 # Data & Modèles

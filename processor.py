@@ -141,13 +141,20 @@ class SignalProcessor:
         # 1. Uniform Resampling
         dt = 1.0 / self.target_fps
         t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
+        
+        # ==========================================
+        # SECURITY FIX: Ensure the time window is physically wide enough 
+        # to produce enough data points for the SciPy filter (padlen ~ 15).
+        # ==========================================
+        if len(t_uniform) <= 30: 
+            return None
+            
         signal_uniform = np.interp(t_uniform, ts, signal)
         
         # 2. Prevent Filter Ringing
-        # Smooth out vertical cliffs into gentle slopes
         signal_uniform = self.remove_impulse_noise(signal_uniform)
         
-        # 3. Apply your Dynamic Range Compressor
+        # 3. Apply Dynamic Range Compressor
         signal_uniform = self.detrend_and_normalize(signal_uniform)
 
         lowcut = LOWCUT_HZ
