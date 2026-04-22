@@ -15,6 +15,15 @@ from typing import Tuple, Optional
 from scipy.signal import butter, sosfiltfilt, detrend
 import cv2
 
+try:
+    import cupy as cp
+    USE_GPU = True
+    logging.info("🚀 CuPy loaded successfully. GPU Acceleration ENABLED.")
+except ImportError as e:
+    import numpy as cp # Use numpy as a drop-in replacement for CuPy
+    USE_GPU = False
+    logging.warning(f"⚠️ CuPy not available ({e}). Falling back to CPU (NumPy).")
+
 # Minimum number of seconds required to perform filtering and FFT analysis
 MINIMUM_AMOUNT_OF_DATA = 4 
 # Filter parameters for bandpass filter (these can be tuned based on expected heart rate range)
@@ -82,20 +91,28 @@ class SignalProcessor:
             # Pixel Sorting (Trimmed Mean)
             # Destroys Specular Glare and Shadows before they enter the buffer
             # ==========================================
-            sorted_pixels = np.sort(skin_pixels)
+            # GPU OPTIMIZATION: Send array to Ampere GPU for fast sorting
+            # ==========================================
+            # cp becomes either CuPy (Jetson) or NumPy (PC) dynamically
+            skin_pixels_array = cp.asarray(skin_pixels)
+            sorted_pixels = cp.sort(skin_pixels_array)
             
-            # Bottom 5% = Shadows, wrinkles, stray hair
-            bottom_trim = int(len(sorted_pixels) * 0.05)
-            
-            # Top 20% = Aggressive Specular Glare removal
-            top_trim = int(len(sorted_pixels) * 0.20)
+            total_pixels = len(sorted_pixels)
+            bottom_trim = int(total_pixels * 0.05)
+            top_trim = int(total_pixels * 0.20)
             
             if bottom_trim > 0 and top_trim > 0:
                 pure_skin = sorted_pixels[bottom_trim:-top_trim]
             else:
                 pure_skin = sorted_pixels
                 
-            region_val = float(np.mean(pure_skin))
+            mean_val = cp.mean(pure_skin)
+            
+            # CuPy arrays need .get() to become floats, NumPy floats don't
+            if USE_GPU:
+                region_val = float(mean_val.get())
+            else:
+                region_val = float(mean_val)
             # ==========================================
             
             weighted_sum += region_val * weights[region_name]

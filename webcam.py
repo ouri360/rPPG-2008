@@ -32,7 +32,14 @@ class WebcamStream:
         # bypassing GStreamer to allow hardware locking without admin rights.
         # ==========================================
         if isinstance(self.source, int):
-            self.cap = cv2.VideoCapture(self.source, cv2.CAP_V4L2)
+            # Jetson USB Webcam GStreamer Pipeline (more efficient than OpenCV's default V4L2 capture)
+            gstreamer_pipeline = (
+                f"v4l2src device=/dev/video{self.source} ! "
+                "video/x-raw, width=640, height=480, framerate=30/1 ! "
+                "videoconvert ! video/x-raw, format=BGR ! "
+                "appsink drop=1"
+            )
+            self.cap = cv2.VideoCapture(gstreamer_pipeline, cv2.CAP_GSTREAMER)
         else:
             self.cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)  # Use FFMPEG for video files
         
