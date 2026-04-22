@@ -15,7 +15,7 @@ from processor import SignalProcessor
 from gt import GroundTruthReader
 import time
 
-DEBUG_MODE = True
+DEBUG_MODE = False # Set to True to enable live plotting of signals
 
 def main():
     detector = FaceDetector()
