@@ -47,6 +47,10 @@ class RPPGDashboard(QMainWindow):
         self.plot_video = self.video_widget.addPlot(title="Live Camera Feed")
         self.plot_video.hideAxis('bottom')
         self.plot_video.hideAxis('left')
+        # 1. Empêche l'étirement (maintient le ratio original de la vidéo)
+        self.plot_video.setAspectLocked(True)
+        # 2. Inverse l'axe Y pour correspondre au format matriciel d'OpenCV
+        self.plot_video.invertY(True)
         self.img_video = pg.ImageItem(axisOrder='row-major') 
         self.plot_video.addItem(self.img_video)
         layout.addWidget(self.video_widget, stretch=1) # Occupe 50% de l'écran
@@ -78,8 +82,11 @@ class RPPGDashboard(QMainWindow):
         try:
             data = self.data_queue.get_nowait()
             
+            # Mise à jour de la vidéo
             if data.get('frame') is not None:
                 self.img_video.setImage(data['frame'], levels=(0, 255))
+            
+            # Mise à jour des graphiques
             if data.get('raw_signal') is not None and len(data['raw_signal']) > 0:
                 self.curve_raw.setData(data['raw_signal'])
             if data.get('filtered_signal') is not None and len(data['filtered_signal']) > 0:
@@ -106,10 +113,8 @@ def rppg_processing_thread(data_queue):
     """
     detector = FaceDetector()
 
-    # Focusing on Live Webcam as requested
+    # Configuration de la source
     VIDEO_SOURCE = "dataset/UBFC-rPPG-Set2-Realistic/vid_subject1.avi"
-    # GT_FILE = "dataset/UBFC-rPPG-Set2-Realistic/gt_subject1.txt" 
-    # gt_reader = GroundTruthReader(GT_FILE)
     
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         frame_counter = 0
@@ -117,17 +122,17 @@ def rppg_processing_thread(data_queue):
 
         last_rois = None
 
-        while True:
+        # CORRECTION 1 : On boucle tant que l'utilisateur n'a pas fermé la fenêtre
+        while not stop_event.is_set():
             success, frame = cam.read_frame()
             if not success: 
-                break
+                logging.info("Fin de la vidéo atteinte. Analyse maintenue à l'écran.")
+                break # On sort de la boucle de lecture, mais la fenêtre reste ouverte
 
             frame_counter += 1
             timestamp = time.time()
 
-            # ==================================================
-            # OPTIMIZATION: Run MediaPipe every 5 frames only
-            # ==================================================
+            # Optimisation MediaPipe (1 frame sur 5)
             if frame_counter % 5 == 0 or last_rois is None:
                 rois = detector.get_face_mesh_rois(frame)
                 if rois:
@@ -135,18 +140,13 @@ def rppg_processing_thread(data_queue):
             else:
                 rois = last_rois
 
-            # Process the regions of interest
+            # Traitement des ROIs
             if rois:
-                # Extracts pixels (ideally utilizing CuPy inside processor.py)
                 processor.extract_and_buffer_multi(frame, rois, timestamp)
-                
-                # Draw ML polygons
                 for name, polygon in rois.items():
                     cv2.polylines(frame, [polygon], isClosed=True, color=(0, 255, 0), thickness=2)
 
-            # ==================================================
-            # HEADS UP DISPLAY
-            # ==================================================
+            # HUD
             fps = processor.get_current_fps()
             cv2.putText(frame, f"FPS: {fps:.1f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
 
@@ -156,26 +156,22 @@ def rppg_processing_thread(data_queue):
             else:
                 cv2.putText(frame, "Calc BPM...", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
-            # gt_hr = gt_reader.get_hr_at_time(timestamp)
-            # if gt_hr is not None:
-            #    cv2.putText(frame, f"True HR: {gt_hr:.1f}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            # CORRECTION 2 : Conversion BGR vers RGB pour PyQtGraph
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-            # ==================================================
-            # TELEMETRY DISPATCH (Send to GUI Thread)
-            # ==================================================
-            # Update the dashboard every 3 frames to save CPU cycles
+            # Dispatch vers le GUI (toutes les 3 frames pour économiser le CPU)
             if frame_counter % 3 == 0:
                 raw_data = list(processor.raw_signal)
                 filtered_data = processor.get_filtered_signal()
                 
                 payload = {
+                    'frame': frame_rgb, # La vidéo est maintenant envoyée !
                     'raw_signal': raw_data,
                     'filtered_signal': filtered_data,
                     'freqs': freqs,
                     'filt_mag': filt_mag
                 }
                 
-                # Push safely to queue, discarding old data if GUI is lagging
                 try:
                     data_queue.put_nowait(payload)
                 except queue.Full:
@@ -185,27 +181,25 @@ def rppg_processing_thread(data_queue):
                         pass
                     data_queue.put_nowait(payload)
 
-    # Tell PyQt to quit nicely
-    QApplication.quit()
+            # CORRECTION 3 : Simulateur de temps réel pour les vidéos
+            if isinstance(VIDEO_SOURCE, str):
+                time.sleep(1.0 / cam.fps)
+
+    # CORRECTION 4 : Plus d'auto-destruction `QApplication.quit()`. 
+    # Le thread se termine, mais PyQt reste ouvert pour afficher les résultats finaux.
 
 
 # ==========================================
 # 3. APPLICATION ENTRY POINT
 # ==========================================
 if __name__ == "__main__":
-    # Create the queue (size 1 prevents memory buildup, always keeps only the freshest data)
     telemetry_queue = queue.Queue(maxsize=1)
-
-    # Instantiate the PyQt Application
     app = QApplication(sys.argv)
 
-    # Start the Math & Camera logic in a background daemon thread
     worker = threading.Thread(target=rppg_processing_thread, args=(telemetry_queue,), daemon=True)
     worker.start()
 
-    # Create and show the PyQtGraph Dashboard on the main thread
     window = RPPGDashboard(telemetry_queue)
     window.show()
 
-    # Enter the blocking Qt event loop
     sys.exit(app.exec_())
