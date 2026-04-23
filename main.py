@@ -114,7 +114,7 @@ def rppg_processing_thread(data_queue):
     detector = FaceDetector()
 
     # Configuration de la source
-    VIDEO_SOURCE = "dataset/UBFC-rPPG-Set2-Realistic/vid_subject1.avi"
+    VIDEO_SOURCE = 0 # 0 pour la webcam, ou "path/to/video.mp4" pour une vidéo préenregistrée
     
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         frame_counter = 0
