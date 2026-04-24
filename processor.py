@@ -43,9 +43,25 @@ class SignalProcessor:
             'right_cheek': {'r': deque(maxlen=self.max_length), 'g': deque(maxlen=self.max_length), 'b': deque(maxlen=self.max_length)}
         }
 
-        # POSNet is a lightweight CNN 
-        self.pos_net = POSNet()
-        self.pos_net.load_state_dict(torch.load('pos_net_weights.pt'))
+        
+        # ==========================================
+        # Load the trained POSNet
+        # ==========================================
+        # 1. Détection automatique du GPU (pour la Jetson)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # 2. Instanciation ET transfert du modèle vers la puce graphique (POSNet is a lightweight CNN)
+        self.pos_net = POSNet(num_rois=3).to(self.device)
+        
+        # 3. Chargement sécurisé avec `map_location` pour aligner la mémoire
+        weights_path = 'pos_net_weights.pt'
+        try:
+            self.pos_net.load_state_dict(torch.load(weights_path, map_location=self.device))
+            logging.info(f"Successfully loaded POSNet weights from {weights_path} onto {self.device}")
+        except FileNotFoundError:
+            logging.error(f"CRITICAL: Could not find {weights_path}! You must run train.py first.")
+            
+        # 4. Verrouillage du modèle en mode Inférence
         self.pos_net.eval()
 
         # Alias for main.py Graph 1 backwards compatibility (shows Green channel)
