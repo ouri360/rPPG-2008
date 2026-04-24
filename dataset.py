@@ -59,6 +59,8 @@ class UBFCPhysDataset(Dataset):
             
         self.x_data_tensor = torch.stack(self.x_data)
         self.y_data_tensor = torch.stack(self.y_data)
+
+        del self.detector # Free up memory
         
         logging.info(f"Dataset loaded: {len(self.x_data_tensor)} windows generated.")
 

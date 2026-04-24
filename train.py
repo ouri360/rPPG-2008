@@ -54,7 +54,7 @@ def train_model() -> None:
     """Main training loop."""
     # Hyperparameters
     epochs = 50
-    batch_size = 32
+    batch_size = 128
     learning_rate = 1e-3        
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -132,7 +132,7 @@ def train_model() -> None:
     native_fps = dataset.target_fps
     logging.info(f"Training configured for {native_fps} FPS with sequence length {dynamic_seq_len}") 
 
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
 
     # Training Loop
     for epoch in range(epochs):
