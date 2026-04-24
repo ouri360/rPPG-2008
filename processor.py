@@ -145,12 +145,15 @@ class SignalProcessor:
         H = np.zeros(N)
         
         roi_keys = ['forehead', 'left_cheek', 'right_cheek']
+        num_windows = N - L + 1
 
-        for n in range(N - L + 1):
-            tensor_input = np.zeros((1, 2, L, 3), dtype=np.float32)
-            
+        # 1. Prepare a single MASSIVE batch tensor on the CPU for all windows
+        # Shape: (Batch_Size=num_windows, Channels=2, SeqLen=L, ROIs=3)
+        batch_input = np.zeros((num_windows, 2, L, 3), dtype=np.float32)
+
+        for n in range(num_windows):
             for roi_idx, region_name in enumerate(roi_keys):
-
+                
                 C_window = C_rois[region_name][:, n:n+L] 
                 
                 mean_c = np.mean(C_window, axis=1, keepdims=True)
@@ -159,22 +162,28 @@ class SignalProcessor:
                 S1 = Cn[1, :] - Cn[2, :]
                 S2 = -2.0 * Cn[0, :] + Cn[1, :] + Cn[2, :]
                 
-                tensor_input[0, 0, :, roi_idx] = S1
-                tensor_input[0, 1, :, roi_idx] = S2
+                batch_input[n, 0, :, roi_idx] = S1
+                batch_input[n, 1, :, roi_idx] = S2
                 
-            with torch.no_grad():
-                x_tensor = torch.from_numpy(tensor_input)
-                
-                # Send the tensor to whatever device the model is currently living on
-                model_device = next(self.pos_net.parameters()).device
-                x_tensor = x_tensor.to(model_device)
-                
-                h_pred = self.pos_net(x_tensor)
-                
-                # Send the prediction back to the CPU before converting to NumPy
-                h = h_pred.cpu().numpy()[0]
-                
+        # 2. SPEEDUP: Send the entire batch to the GPU ONCE
+        with torch.no_grad():
+            x_tensor = torch.from_numpy(batch_input)
+            
+            # Send to GPU
+            model_device = next(self.pos_net.parameters()).device
+            x_tensor = x_tensor.to(model_device)
+            
+            # The GPU processes all 800+ windows simultaneously
+            h_preds = self.pos_net(x_tensor) 
+            
+            # Bring all 800+ predictions back to the CPU ONCE
+            h_preds_numpy = h_preds.cpu().numpy() # Shape will be (num_windows, L)
+            
+        # 3. Apply the Overlap-Add using the predicted array
+        for n in range(num_windows):
+            h = h_preds_numpy[n]
             H[n:n+L] += (h - np.mean(h))
+            
             
         # ==========================================
         # 3. Detrending + slicing edges
