@@ -70,9 +70,9 @@ def calculate_metrics(df: pd.DataFrame, output_csv: str):
 
 def main():
     # --- CONFIGURATION ---
-    VIDEO_SOURCE = "dataset/UBFC-Phys-S1/vid_s1_T3.avi"       # Point this to your UBFC video
-    GT_FILE = "dataset/UBFC-Phys-S1/bvp_s1_T3.csv"    # Point this to your UBFC ground truth
-    OUTPUT_CSV = "dataset/results/benchmark_results_s1_T3_POS.csv"
+    VIDEO_SOURCE = "dataset/UBFC-Phys-S1/vid_s1_T1.avi"       # Point this to your UBFC video
+    GT_FILE = "dataset/UBFC-Phys-S1/bvp_s1_T1.csv"    # Point this to your UBFC ground truth
+    OUTPUT_CSV = "dataset/results/benchmark_results_s1_T1_POS_DeepLearning.csv"
     WARMUP_SECONDS = 35.0                  # Ignore the first 35 seconds
     # ---------------------
 
@@ -134,7 +134,7 @@ def main():
         # Calculate and print the final SOTA metrics
         calculate_metrics(df, OUTPUT_CSV)
     else:
-        print("\nBenchmark failed: Not enough data collected. Ensure the video is longer than 40 seconds.")
+        print("\nBenchmark failed: Not enough data collected. Ensure the video is longer than 35 seconds.")
 
 if __name__ == "__main__":
     main()
