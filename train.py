@@ -47,15 +47,15 @@ class NegativePearsonLoss(nn.Module):
         pearson = cov / (std_p * std_t)
         
         # Minimize the loss -> maximize correlation (1.0 is perfect correlation)
-        return 1.0 - torch.mean(pearson)
+        return 1.0 - torch.mean(torch.abs(pearson))
 
 
 def train_model() -> None:
     """Main training loop."""
     # Hyperparameters
-    epochs = 50
+    epochs = 80
     batch_size = 128
-    learning_rate = 1e-3        
+    learning_rate = 1e-3      
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"Starting training on device: {device}")
@@ -70,13 +70,19 @@ def train_model() -> None:
 
     if os.path.exists(cache_path):
         logging.info(f"Found cached dataset at '{cache_path}'. Loading directly into memory...")
-        dataset = torch.load(cache_path)
+        dataset = torch.load(cache_path, weights_only=False)
         logging.info("Dataset loaded instantly!")
         
     else:
         logging.info("No cache found. Processing videos from scratch (this may take a while)...")
 
         video_files = [
+            "dataset/UBFC-Phys-S1/vid_s1_T1.avi",
+            "dataset/UBFC-Phys-S1/vid_s1_T2.avi",
+            "dataset/UBFC-Phys-S1/vid_s1_T3.avi",
+            "dataset/UBFC-Phys-S2/vid_s2_T1.avi",
+            "dataset/UBFC-Phys-S2/vid_s2_T2.avi",
+            "dataset/UBFC-Phys-S2/vid_s2_T3.avi",
             "dataset/UBFC-Phys-S1/vid_s1_T1.avi",
             "dataset/UBFC-Phys-S1/vid_s1_T2.avi",
             "dataset/UBFC-Phys-S1/vid_s1_T3.avi",
@@ -97,6 +103,12 @@ def train_model() -> None:
         ]
 
         gt_files = [
+            "dataset/UBFC-Phys-S1/bvp_s1_T1.csv",
+            "dataset/UBFC-Phys-S1/bvp_s1_T2.csv",
+            "dataset/UBFC-Phys-S1/bvp_s1_T3.csv",
+            "dataset/UBFC-Phys-S2/bvp_s2_T1.csv",
+            "dataset/UBFC-Phys-S2/bvp_s2_T2.csv",
+            "dataset/UBFC-Phys-S2/bvp_s2_T3.csv",
             "dataset/UBFC-Phys-S1/bvp_s1_T1.csv",
             "dataset/UBFC-Phys-S1/bvp_s1_T2.csv",
             "dataset/UBFC-Phys-S1/bvp_s1_T3.csv",
