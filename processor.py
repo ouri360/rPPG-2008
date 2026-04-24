@@ -134,7 +134,7 @@ class SignalProcessor:
             tensor_input = np.zeros((1, 2, L, 3), dtype=np.float32)
             
             for roi_idx, region_name in enumerate(roi_keys):
-                # MAINTENANT C_rois existe !
+
                 C_window = C_rois[region_name][:, n:n+L] 
                 
                 mean_c = np.mean(C_window, axis=1, keepdims=True)
@@ -148,8 +148,15 @@ class SignalProcessor:
                 
             with torch.no_grad():
                 x_tensor = torch.from_numpy(tensor_input)
+                
+                # Send the tensor to whatever device the model is currently living on
+                model_device = next(self.pos_net.parameters()).device
+                x_tensor = x_tensor.to(model_device)
+                
                 h_pred = self.pos_net(x_tensor)
-                h = h_pred.numpy()[0]
+                
+                # Send the prediction back to the CPU before converting to NumPy
+                h = h_pred.cpu().numpy()[0]
                 
             H[n:n+L] += (h - np.mean(h))
             
