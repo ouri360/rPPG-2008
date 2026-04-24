@@ -4,13 +4,15 @@ Training Script for POSNet
 Handles the training loop, loss calculation, and model checkpointing.
 """
 
+import os
 import logging
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from torch import Tensor
 
+from dataset import UBFCPhysDataset
 from model import POSNet
 
 # Configure logging
@@ -48,32 +50,12 @@ class NegativePearsonLoss(nn.Module):
         return 1.0 - torch.mean(pearson)
 
 
-class MockRPPGDataset(Dataset):
-    """
-    Placeholder Dataset.
-    This must be replaced with a class that actually reads your video frames 
-    and ground truth CSVs.
-    """
-
-    def __init__(self, num_samples: int = 1000, seq_len: int = 48) -> None:
-        self.seq_len = seq_len
-        self.x_data = torch.randn(num_samples, 2, seq_len, 3, dtype=torch.float32)
-        self.y_data = torch.sin(torch.linspace(0, 10, seq_len)).unsqueeze(0).repeat(num_samples, 1)
-
-    def __len__(self) -> int:
-        return len(self.x_data)
-
-    def __getitem__(self, idx: int) -> tuple[Tensor, Tensor]:
-        return self.x_data[idx], self.y_data[idx]
-
-
 def train_model() -> None:
     """Main training loop."""
     # Hyperparameters
     epochs = 50
     batch_size = 32
-    learning_rate = 1e-3
-    seq_len = 48  # L = int(30fps * 1.6s)
+    learning_rate = 1e-3        
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info(f"Starting training on device: {device}")
@@ -83,8 +65,73 @@ def train_model() -> None:
     criterion = NegativePearsonLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    # Note: Replace MockRPPGDataset with your actual UBFC dataloader
-    dataset = MockRPPGDataset(num_samples=2000, seq_len=seq_len)
+    # FIXED: Renamed to clearly identify this as the dataset cache, not model weights
+    cache_path = 'preprocessed_ubfc_dataset.pt'
+
+    if os.path.exists(cache_path):
+        logging.info(f"Found cached dataset at '{cache_path}'. Loading directly into memory...")
+        dataset = torch.load(cache_path)
+        logging.info("Dataset loaded instantly!")
+        
+    else:
+        logging.info("No cache found. Processing videos from scratch (this may take a while)...")
+
+        video_files = [
+            "dataset/UBFC-Phys-S1/vid_s1_T1.avi",
+            "dataset/UBFC-Phys-S1/vid_s1_T2.avi",
+            "dataset/UBFC-Phys-S1/vid_s1_T3.avi",
+            "dataset/UBFC-Phys-S2/vid_s2_T1.avi",
+            "dataset/UBFC-Phys-S2/vid_s2_T2.avi",
+            "dataset/UBFC-Phys-S2/vid_s2_T3.avi",
+            "dataset/UBFC-rPPG-Set1-Not_Moving/vid_subject5.avi",
+            "dataset/UBFC-rPPG-Set1-Not_Moving/vid_subject6.avi",
+            "dataset/UBFC-rPPG-Set1-Not_Moving/vid_subject7.avi",
+            "dataset/UBFC-rPPG-Set1-Not_Moving/vid_subject8.avi",
+            "dataset/UBFC-rPPG-Set1-Not_Moving/vid_subject10.avi",
+            "dataset/UBFC-rPPG-Set1-Not_Moving/vid_subject11.avi",
+            "dataset/UBFC-rPPG-Set1-Not_Moving/vid_subject12.avi",
+            "dataset/UBFC-rPPG-Set2-Realistic/vid_subject1.avi",
+            "dataset/UBFC-rPPG-Set2-Realistic/vid_subject3.avi",
+            "dataset/UBFC-rPPG-Set2-Realistic/vid_subject4.avi",
+            "dataset/UBFC-rPPG-Set2-Realistic/vid_subject9.avi"
+        ]
+
+        gt_files = [
+            "dataset/UBFC-Phys-S1/bvp_s1_T1.csv",
+            "dataset/UBFC-Phys-S1/bvp_s1_T2.csv",
+            "dataset/UBFC-Phys-S1/bvp_s1_T3.csv",
+            "dataset/UBFC-Phys-S2/bvp_s2_T1.csv",
+            "dataset/UBFC-Phys-S2/bvp_s2_T2.csv",
+            "dataset/UBFC-Phys-S2/bvp_s2_T3.csv",
+            "dataset/UBFC-rPPG-Set1-Not_Moving/gt_subject5.xmp",
+            "dataset/UBFC-rPPG-Set1-Not_Moving/gt_subject6.xmp",
+            "dataset/UBFC-rPPG-Set1-Not_Moving/gt_subject7.xmp",
+            "dataset/UBFC-rPPG-Set1-Not_Moving/gt_subject8.xmp",
+            "dataset/UBFC-rPPG-Set1-Not_Moving/gt_subject10.xmp",
+            "dataset/UBFC-rPPG-Set1-Not_Moving/gt_subject11.xmp",
+            "dataset/UBFC-rPPG-Set1-Not_Moving/gt_subject12.xmp",
+            "dataset/UBFC-rPPG-Set2-Realistic/gt_subject1.txt",
+            "dataset/UBFC-rPPG-Set2-Realistic/gt_subject3.txt",
+            "dataset/UBFC-rPPG-Set2-Realistic/gt_subject4.txt",
+            "dataset/UBFC-rPPG-Set2-Realistic/gt_subject9.txt"
+        ]
+
+        # Initialize the actual dataset
+        dataset = UBFCPhysDataset(
+            video_paths=video_files, 
+            gt_paths=gt_files
+        )
+
+        # Save the processed dataset to disk for next time
+        logging.info(f"Saving processed dataset to '{cache_path}' for future runs...")
+        torch.save(dataset, cache_path)
+        logging.info("Cache saved successfully!")
+
+    # Retrieve the auto-calculated parameters (works whether cached or freshly built)
+    dynamic_seq_len = dataset.seq_len
+    native_fps = dataset.target_fps
+    logging.info(f"Training configured for {native_fps} FPS with sequence length {dynamic_seq_len}") 
+
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     # Training Loop
@@ -115,7 +162,7 @@ def train_model() -> None:
             logging.info(f"Epoch [{epoch + 1}/{epochs}] - Loss: {avg_loss:.4f}")
 
     # Save the trained weights
-    save_path = 'pos_net_weights.pth'
+    save_path = 'pos_net_weights.pt'
     torch.save(model.state_dict(), save_path)
     logging.info(f"Training complete. Weights saved to {save_path}.")
 

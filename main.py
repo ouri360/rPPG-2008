@@ -37,8 +37,8 @@ def main():
         ax3.set_xlabel("Frequency (Hz)")
         ax3.set_ylabel("Power")
 
-    VIDEO_SOURCE = "dataset/UBFC-Phys-S1/vid_s1_T2.avi"       # Point this to your UBFC video
-    GT_FILE = "dataset/UBFC-Phys-S1/bvp_s1_T2.csv"
+    VIDEO_SOURCE = "dataset/UBFC-rPPG-Set2-Realistic/vid_subject1.avi"      # Point this to your UBFC video
+    GT_FILE = "dataset/UBFC-rPPG-Set2-Realistic/gt_subject1.txt"              # Point this to the corresponding .xmp ground truth file
     
     gt_reader = GroundTruthReader(GT_FILE)
     # Check if the source is an integer (Webcam) or a string (Video Path)

@@ -12,9 +12,11 @@ from scipy.signal import butter, filtfilt, find_peaks
 
 class GroundTruthReader:
     def __init__(self, filepath: str):
-        self.timestamps = []
-        self.gt_hr = []
-        self.gt_signal = []
+        self.timestamps = []     # High-res timeline for the DL waveform
+        self.gt_signal = []      # The actual BVP/PPG waveform
+        
+        self.hr_timestamps = []  # Low-res timeline for the HUD
+        self.gt_hr = []          # The calculated BPM values
 
         if not os.path.exists(filepath):
             logging.error(f"Ground truth file not found: {filepath}")
@@ -22,10 +24,7 @@ class GroundTruthReader:
 
         filename_lower = os.path.basename(filepath).lower()
 
-        # ==========================================
-        # DSP UPGRADE: Multi-Dataset Auto-Parser
-        # Routes the parsing logic based on the file type and sensor type!
-        # ==========================================
+        # Route the parsing logic based on the file type and sensor type
         if filepath.endswith('.txt'):
             self._parse_ubfc_rppg(filepath)
         elif filepath.endswith('.xmp'):
@@ -34,9 +33,9 @@ class GroundTruthReader:
             if 'bvp' in filename_lower:
                 self._parse_empatica_bvp(filepath)
             elif 'eda' in filename_lower:
-                logging.error("CRITICAL: eda.csv measures sweat (Electrodermal Activity), not Heart Rate! Please point to bvp.csv.")
+                logging.error("CRITICAL: eda.csv measures sweat, not Heart Rate! Point to bvp.csv.")
             else:
-                self._parse_empatica_csv(filepath) # Fallback if HR.csv exists
+                self._parse_empatica_csv(filepath) 
         else:
             logging.error(f"Unsupported file format: {filepath}")
 
@@ -64,15 +63,10 @@ class GroundTruthReader:
 
     def _parse_empatica_bvp(self, filepath: str):
         """
-        Parses raw Blood Volume Pulse (bvp.csv) from Empatica E4 
-        and dynamically calculates the true BPM using Peak Detection.
+        Parses raw Blood Volume Pulse (bvp.csv) from Empatica E4.
+        Extracts the exact waveform for DL training and calculates true BPM for HUD.
         """
         try:
-            # ==========================================
-            # DSP UPGRADE: UBFC-Phys BVP Fix
-            # The researchers stripped the metadata headers.
-            # The file is pure data sampled at the Empatica E4 standard of 64 Hz.
-            # ==========================================
             bvp_signal = np.loadtxt(filepath, delimiter=',')
             hz = 64.0  # Hardcoded Empatica E4 sensor frequency
             
@@ -80,35 +74,37 @@ class GroundTruthReader:
             b, a = butter(2, [0.7, 3.0], btype='bandpass', fs=hz)
             clean_bvp = filtfilt(b, a, bvp_signal)
             
-            # 2. Sliding window to calculate BPM (8-second window, 1-second stride)
+            # EXPORT THE WAVEFORM FOR DEEP LEARNING (Negative Pearson Loss)
+            self.gt_signal = clean_bvp
+            self.timestamps = np.arange(len(clean_bvp)) / hz
+            
+            # 2. Sliding window to calculate BPM (For the live HUD)
             window_sec = 8
             stride_sec = 1
             window_pts = int(window_sec * hz)
             stride_pts = int(stride_sec * hz)
             
             hr_list = []
-            ts_list = []
+            hr_times = []
             
             for i in range(0, len(clean_bvp) - window_pts, stride_pts):
                 window = clean_bvp[i : i + window_pts]
-                
-                # Minimum distance between peaks: 0.33 seconds (max 180 BPM)
                 peaks, _ = find_peaks(window, distance=hz*0.33) 
                 
                 if len(peaks) >= 2:
-                    ibis = np.diff(peaks) / hz # Calculate Inter-Beat Intervals
+                    ibis = np.diff(peaks) / hz
                     bpm = 60.0 / np.mean(ibis)
                 else:
-                    bpm = hr_list[-1] if len(hr_list) > 0 else 70.0 # Fallback
+                    bpm = hr_list[-1] if len(hr_list) > 0 else 70.0 
                     
                 hr_list.append(bpm)
-                # Assign the calculated HR to the exact middle of the window
-                ts_list.append((i + (window_pts / 2)) / hz)
+                # Timestamp for the HUD is the center of the 8-second window
+                hr_times.append((i + (window_pts / 2)) / hz)
                 
-            self.timestamps = np.array(ts_list)
             self.gt_hr = np.array(hr_list)
+            self.hr_timestamps = np.array(hr_times)
             
-            logging.info(f"Loaded UBFC-Phys BVP: Dynamically calculated {len(self.gt_hr)} True HR points from raw wrist optical data at {hz} Hz.")
+            logging.info(f"Loaded UBFC-Phys BVP: Extracted {len(self.gt_signal)} waveform points at {hz} Hz.")
         except Exception as e:
             logging.error(f"Failed to process BVP file: {e}")
 
@@ -118,28 +114,38 @@ class GroundTruthReader:
             data = np.loadtxt(filepath, delimiter=',')
             hz = data[1]
             hr_data = data[2:]
-            self.timestamps = np.arange(len(hr_data)) / hz
+            
+            self.hr_timestamps = np.arange(len(hr_data)) / hz
             self.gt_hr = hr_data
-            logging.info(f"Loaded UBFC-Phys pre-calculated HR: {len(self.timestamps)} readings at {hz} Hz.")
+            
+            # Fallback for DL if no waveform is present (flatline)
+            self.timestamps = self.hr_timestamps
+            self.gt_signal = hr_data 
+            
+            logging.info(f"Loaded UBFC-Phys pre-calculated HR: {len(self.hr_timestamps)} readings at {hz} Hz.")
         except Exception as e:
             logging.error(f"Failed to load Empatica .csv file: {e}")
-
+        
     def get_hr_at_time(self, current_time: float) -> float:
         """Finds the closest ground truth Heart Rate for a given video timestamp."""
-        if len(self.timestamps) == 0 or len(self.gt_hr) == 0:
+        
+        # FIX: We now search the dedicated hr_timestamps array, not the waveform array!
+        time_axis = self.hr_timestamps if len(self.hr_timestamps) > 0 else self.timestamps
+        
+        if len(time_axis) == 0 or len(self.gt_hr) == 0:
             return None
             
-        idx = np.searchsorted(self.timestamps, current_time)
+        idx = np.searchsorted(time_axis, current_time)
         
         if idx == 0:
-            return self.gt_hr[0]
-        if idx >= len(self.timestamps):
-            return self.gt_hr[-1]
+            return float(self.gt_hr[0])
+        if idx >= len(time_axis):
+            return float(self.gt_hr[-1])
             
-        left_time = self.timestamps[idx - 1]
-        right_time = self.timestamps[idx]
+        left_time = time_axis[idx - 1]
+        right_time = time_axis[idx]
         
-        if (current_time - left_time) < (right_time - current_time):
-            return self.gt_hr[idx - 1]
+        if abs(current_time - left_time) < abs(current_time - right_time):
+            return float(self.gt_hr[idx - 1])
         else:
-            return self.gt_hr[idx]
+            return float(self.gt_hr[idx])

@@ -43,9 +43,9 @@ class SignalProcessor:
             'right_cheek': {'r': deque(maxlen=self.max_length), 'g': deque(maxlen=self.max_length), 'b': deque(maxlen=self.max_length)}
         }
 
-        # POSNet is a lightweight CNN that learns to optimize the POS projection in a data-driven way.
+        # POSNet is a lightweight CNN 
         self.pos_net = POSNet()
-        self.pos_net.load_state_dict(torch.load('pos_net_weights.pth'))
+        self.pos_net.load_state_dict(torch.load('pos_net_weights.pt'))
         self.pos_net.eval()
 
         # Alias for main.py Graph 1 backwards compatibility (shows Green channel)
