@@ -13,6 +13,9 @@ from typing import Tuple, Optional
 from scipy.signal import butter, detrend, sosfiltfilt
 import cv2
 
+from model import POSNet
+import torch
+
 MINIMUM_AMOUNT_OF_DATA = 2 
 LOWCUT_HZ = 0.7         # Lowered to 42 BPM to safely capture resting heart rates
 HIGHCUT_HZ = 3.0        # Raised to 180 BPM to capture elevated heart rates
@@ -33,6 +36,18 @@ class SignalProcessor:
         self.raw_g = deque(maxlen=self.max_length)
         self.raw_b = deque(maxlen=self.max_length)
         
+        # In order to separately track the ROIs, we maintain a history of pixel values for each region.
+        self.rois_history = {
+            'forehead': {'r': deque(maxlen=self.max_length), 'g': deque(maxlen=self.max_length), 'b': deque(maxlen=self.max_length)},
+            'left_cheek': {'r': deque(maxlen=self.max_length), 'g': deque(maxlen=self.max_length), 'b': deque(maxlen=self.max_length)},
+            'right_cheek': {'r': deque(maxlen=self.max_length), 'g': deque(maxlen=self.max_length), 'b': deque(maxlen=self.max_length)}
+        }
+
+        # POSNet is a lightweight CNN that learns to optimize the POS projection in a data-driven way.
+        self.pos_net = POSNet()
+        self.pos_net.load_state_dict(torch.load('pos_net_weights.pth'))
+        self.pos_net.eval()
+
         # Alias for main.py Graph 1 backwards compatibility (shows Green channel)
         self.raw_signal = self.raw_g 
         
@@ -44,94 +59,98 @@ class SignalProcessor:
         
         logging.info("SignalProcessor using to POS RGB Architecture.")
     
-    def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict, timestamp: float) -> float:
+    def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict, timestamp: float) -> None:
         b_channel, g_channel, r_channel = cv2.split(frame)
         
-        master_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+        global_g = [] # Pour maintenir la compatibilité avec self.raw_g
         
         for region_name, polygon in rois.items():
-            cv2.fillPoly(master_mask, [polygon], 255)
+            # Il faut créer un masque spécifique à la région courante
+            roi_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+            cv2.fillPoly(roi_mask, [polygon], 255)
             
-        r_pixels = r_channel[master_mask == 255]
-        g_pixels = g_channel[master_mask == 255]
-        b_pixels = b_channel[master_mask == 255]
-        
-        if len(g_pixels) > 0:
-            final_r = float(np.mean(r_pixels))
-            final_g = float(np.mean(g_pixels))
-            final_b = float(np.mean(b_pixels))
+            # Extraction des pixels de CETTE région uniquement
+            r_pixels = r_channel[roi_mask == 255]
+            g_pixels = g_channel[roi_mask == 255]
+            b_pixels = b_channel[roi_mask == 255]
+            
+            if len(g_pixels) > 0:
+                self.rois_history[region_name]['r'].append(float(np.mean(r_pixels)))
+                self.rois_history[region_name]['g'].append(float(np.mean(g_pixels)))
+                self.rois_history[region_name]['b'].append(float(np.mean(b_pixels)))
+                global_g.extend(g_pixels)
+            else:
+                self.rois_history[region_name]['r'].append(0.0)
+                self.rois_history[region_name]['g'].append(0.0)
+                self.rois_history[region_name]['b'].append(0.0)
+
+        # Maintien de la variable raw_g pour le Graph 1 et les checks de longueur
+        if len(global_g) > 0:
+            self.raw_g.append(float(np.mean(global_g)))
         else:
-            final_r, final_g, final_b = 0.0, 0.0, 0.0
+            self.raw_g.append(0.0)
 
-        self.raw_r.append(final_r)
-        self.raw_g.append(final_g)
-        self.raw_b.append(final_b)
         self.timestamps.append(timestamp)
-
-        return final_g
 
     def get_signal_data(self) -> Tuple[np.ndarray, np.ndarray]:
         return np.array(self.raw_g), np.array(self.timestamps)
     
     def get_filtered_signal(self) -> Optional[np.ndarray]:
-        if len(self.raw_g) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
+        # On vérifie sur les timestamps puisque c'est la source de vérité
+        if len(self.timestamps) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None
 
-        r = np.array(list(self.raw_r))
-        g = np.array(list(self.raw_g))
-        b = np.array(list(self.raw_b))
-        
-        # Timestamps array
         ts = np.array(list(self.timestamps))
-
-        # We enforce exactly a 30-second window, throwing away 
-        # older data even if the camera dropped frames
-        # ==========================================
         time_limit = ts[-1] - self.buffer_seconds
         valid_indices = np.where(ts >= time_limit)[0]
-        
-        r = r[valid_indices]
-        g = g[valid_indices]
-        b = b[valid_indices]
         ts = ts[valid_indices]
         
-        # If pruning left us with too little data, abort safely
         if len(ts) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None
 
-        # ==========================================
-        # 1. Temporal Resampling
-        # POS strictly requires uniform matrices. We interpolate 
-        # the physical frames into a flawless 30Hz grid.
-        # ==========================================
+        # 1. Resampling Temporel pour CHAQUE région
         dt = 1.0 / self.target_fps
         t_uniform = np.arange(ts[0], ts[-1] + dt/2, dt)
         
-        r_u = np.interp(t_uniform, ts, r)
-        g_u = np.interp(t_uniform, ts, g)
-        b_u = np.interp(t_uniform, ts, b)
-        
-        C = np.vstack([r_u, g_u, b_u])
-        N = C.shape[1]
-        
+        C_rois = {}
+        for region_name in self.rois_history.keys():
+            r = np.array(list(self.rois_history[region_name]['r']))[valid_indices]
+            g = np.array(list(self.rois_history[region_name]['g']))[valid_indices]
+            b = np.array(list(self.rois_history[region_name]['b']))[valid_indices]
+            
+            r_u = np.interp(t_uniform, ts, r)
+            g_u = np.interp(t_uniform, ts, g)
+            b_u = np.interp(t_uniform, ts, b)
+            
+            C_rois[region_name] = np.vstack([r_u, g_u, b_u])
+            
+        N = C_rois['forehead'].shape[1]
         L = int(self.target_fps * 1.6) 
         H = np.zeros(N)
         
-        # ==========================================
-        # 2. Strict POS Overlap-Add Loop
-        # ==========================================
+        roi_keys = ['forehead', 'left_cheek', 'right_cheek']
+
         for n in range(N - L + 1):
-            C_window = C[:, n:n+L]
+            tensor_input = np.zeros((1, 2, L, 3), dtype=np.float32)
             
-            mean_c = np.mean(C_window, axis=1, keepdims=True)
-            Cn = C_window / (mean_c + 1e-8)
-            
-            S1 = Cn[1, :] - Cn[2, :]
-            S2 = -2.0 * Cn[0, :] + Cn[1, :] + Cn[2, :]
-            
-            alpha = np.std(S1) / (np.std(S2) + 1e-8)
-            h = S1 + alpha * S2
-            
+            for roi_idx, region_name in enumerate(roi_keys):
+                # MAINTENANT C_rois existe !
+                C_window = C_rois[region_name][:, n:n+L] 
+                
+                mean_c = np.mean(C_window, axis=1, keepdims=True)
+                Cn = C_window / (mean_c + 1e-8)
+                
+                S1 = Cn[1, :] - Cn[2, :]
+                S2 = -2.0 * Cn[0, :] + Cn[1, :] + Cn[2, :]
+                
+                tensor_input[0, 0, :, roi_idx] = S1
+                tensor_input[0, 1, :, roi_idx] = S2
+                
+            with torch.no_grad():
+                x_tensor = torch.from_numpy(tensor_input)
+                h_pred = self.pos_net(x_tensor)
+                h = h_pred.numpy()[0]
+                
             H[n:n+L] += (h - np.mean(h))
             
         # ==========================================
