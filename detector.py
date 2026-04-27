@@ -52,19 +52,21 @@ class FaceDetector:
         h, w, _ = frame.shape
         dynamic_rois = {}
 
+        # ==========================================
+        # RESTORED: Your original Tight Vascular Landmarks!
+        # ==========================================
         original_rois = {
-            'forehead': [103, 67, 109, 10, 338, 297, 332, 284], 
-            'left_cheek': [118, 119, 100, 126, 205, 206, 214, 192, 137, 177, 215, 138],
-            'right_cheek': [347, 348, 329, 355, 425, 426, 434, 416, 366, 401, 435, 367]
+            'forehead': [67, 10, 297, 299, 9, 69],
+            'left_cheek': [117, 118, 101, 36, 205, 50],
+            'right_cheek': [346, 347, 330, 266, 425, 280]
         }
 
-        # 1. Create lightning-fast C++ canvases
+        # 1. Create lightning-fast C++ canvases for Opacity
         if draw:
             overlay = np.zeros_like(frame)
             face_clip_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
 
         for region_name, indices in original_rois.items():
-            # Get the exact mathematical hull
             pts = np.array([(int(landmarks[i].x * w), int(landmarks[i].y * h)) for i in indices], dtype=np.int32)
             hull = cv2.convexHull(pts)
 
@@ -73,10 +75,7 @@ class FaceDetector:
             x, y, w_box, h_box = cv2.boundingRect(hull)
 
             if draw:
-                # Add to the global clipping mask
                 cv2.fillPoly(face_clip_mask, [hull], 255)
-                # RESTORED: Draw the true, original diagonal boundaries!
-                cv2.polylines(overlay, [hull], isClosed=True, color=(0, 255, 0), thickness=1)
 
             for i in range(3):
                 sub_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
@@ -95,12 +94,8 @@ class FaceDetector:
                     cv2.rectangle(sub_mask, (x_start, y), (x_end, y + h_box), 255, -1)
                     
                     if draw:
-                        # Draw ONLY the opacity fill, no blocky rectangular borders!
+                        # Paint the opacity fill
                         cv2.rectangle(overlay, (x_start, y), (x_end, y + h_box), (0, intensity, 0), cv2.FILLED)
-                        # Draw the inner grid lines
-                        if i < 2: 
-                            line_x = x + (i + 1) * slice_w
-                            cv2.line(overlay, (line_x, y), (line_x, y + h_box), (0, 255, 0), 1)
                         
                 else:
                     slice_h = h_box // 3
@@ -110,9 +105,6 @@ class FaceDetector:
                     
                     if draw:
                         cv2.rectangle(overlay, (x, y_start), (x + w_box, y_end), (0, intensity, 0), cv2.FILLED)
-                        if i < 2:
-                            line_y = y + (i + 1) * slice_h
-                            cv2.line(overlay, (x, line_y), (x + w_box, line_y), (0, 255, 0), 1)
 
                 # Execute the math
                 final_mask = cv2.bitwise_and(master_mask, sub_mask)
@@ -120,10 +112,20 @@ class FaceDetector:
                 dynamic_rois[sub_name] = mean_color
 
         if draw:
-            # 2. Perfect, zero-latency clipping. Trims off any boxes/lines that poke out of the hull!
+            # 2. Perfect, zero-latency clipping for the Opacity overlay
             overlay = cv2.bitwise_and(overlay, overlay, mask=face_clip_mask)
-            # 3. Blend the UI onto the live feed
+            
+            # 3. Blend the UI opacity onto the live feed
             cv2.addWeighted(overlay, 0.6, frame, 1.0, 0, frame)
+
+            # 4. RESTORED: Draw the crisp lines DIRECTLY on the frame!
+            for region_name, indices in original_rois.items():
+                pts = np.array([(int(landmarks[i].x * w), int(landmarks[i].y * h)) for i in indices], dtype=np.int32)
+                hull = cv2.convexHull(pts)
+                x, y, w_box, h_box = cv2.boundingRect(hull)
+
+                # Draw the true, original diagonal boundaries!
+                cv2.polylines(frame, [hull], isClosed=True, color=(0, 255, 0), thickness=1)
 
         return dynamic_rois
     
