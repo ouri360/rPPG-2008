@@ -86,10 +86,21 @@ class FaceDetector:
                 sub_name = f"{region_name}_{i+1}"
                 dynamic_rois[sub_name] = mean_color
 
-                # 2. THE VISUALIZER: If draw=True, outline the mask on the frame
-                if draw:
-                    contours, _ = cv2.findContours(final_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                    cv2.drawContours(frame, contours, -1, (0, 255, 0), 1)
+            if draw:
+                # 1. Draw the master boundary of the cheek/forehead
+                cv2.polylines(frame, [hull], isClosed=True, color=(0, 255, 0), thickness=1)
+                
+                # 2. Draw the two internal slice lines to show the grid
+                if region_name == 'forehead':
+                    slice_w = w_box // 3
+                    # Draw two vertical lines
+                    cv2.line(frame, (x + slice_w, y), (x + slice_w, y + h_box), (0, 255, 0), 1)
+                    cv2.line(frame, (x + 2 * slice_w, y), (x + 2 * slice_w, y + h_box), (0, 255, 0), 1)
+                else:
+                    slice_h = h_box // 3
+                    # Draw two horizontal lines
+                    cv2.line(frame, (x, y + slice_h), (x + w_box, y + slice_h), (0, 255, 0), 1)
+                    cv2.line(frame, (x, y + 2 * slice_h), (x + w_box, y + 2 * slice_h), (0, 255, 0), 1)
 
         return dynamic_rois
     
