@@ -14,7 +14,7 @@ from processor import SignalProcessor
 from gt import GroundTruthReader
 import time
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 def main():
     detector = FaceDetector()
@@ -68,7 +68,7 @@ def main():
                 timestamp = frame_counter / cam.fps
 
             # 1. ALWAYS Run Facial Extraction
-            multi_rois = detector.get_face_mesh_rois(frame)
+            multi_rois = detector.get_face_mesh_rois(frame, draw=False)
 
             if multi_rois:
                 # Just pass the colors directly to the processor, no drawing needed!
