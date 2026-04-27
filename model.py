@@ -21,37 +21,38 @@ class POSNet(nn.Module):
     def __init__(self, num_rois: int = 9) -> None:
         super().__init__()
         
-        # 1. Attention Spatiale: Reçoit la variance de S1 et S2 pour chaque ROI
+        # 1. Attention Spatiale: Reçoit l'écart-type (Standard Deviation) de S1 et S2
         self.spatial_attention = nn.Sequential(
+            # THE FIX: This amplifier forces the AI to look at the dynamic noise!
+            nn.BatchNorm1d(num_rois * 2), 
             nn.Linear(num_rois * 2, 32),
             nn.ReLU(inplace=True),
             nn.Linear(32, num_rois),
             nn.Softmax(dim=-1)
         )
         
-        # 2. Estimateur d'Alpha: Un CNN qui analyse globalement la fenêtre
+        # 2. Estimateur d'Alpha
         self.alpha_estimator = nn.Sequential(
             nn.Conv1d(in_channels=2, out_channels=16, kernel_size=5, padding=2),
             nn.BatchNorm1d(16),
             nn.ReLU(inplace=True),
-            # L'AdaptiveAvgPool1d est magique: il force le réseau à analyser 
-            # l'intégralité de la fenêtre de 56 frames d'un seul coup (Global Context)
             nn.AdaptiveAvgPool1d(1), 
             nn.Flatten(),
             nn.Linear(16, 8),
             nn.ReLU(inplace=True),
-            nn.Linear(8, 1), # Prédit un SEUL scalaire : la valeur Alpha parfaite !
+            nn.Linear(8, 1), 
             nn.Softplus()
         )
 
     def forward(self, x: Tensor) -> Tensor:
         B, C, L, R = x.shape
         
-        var_features = torch.var(x, dim=2).view(B, -1) 
-        attention_weights = self.spatial_attention(var_features) 
+        # --- THE FIX: Use standard deviation instead of variance ---
+        # std keeps the noise on the same scale as the signal, preventing vanishing features.
+        std_features = torch.std(x, dim=2).view(B, -1) 
+        attention_weights = self.spatial_attention(std_features) 
         
-        # --- Save the weights for the UI Visualizer ---
-        # We detach it so it doesn't mess with PyTorch gradients/training
+        # Save the weights for the UI Visualizer
         self.latest_weights = attention_weights.detach().cpu().numpy()
         
         weights = attention_weights.unsqueeze(1).unsqueeze(2)
