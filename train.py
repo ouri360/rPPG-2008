@@ -29,7 +29,7 @@ class HybridrPPGLoss(nn.Module):
     def __init__(self, max_shift: int = 15, freq_weight: float = 0.5) -> None:
         super().__init__()
         self.max_shift = max_shift
-        self.freq_weight = freq_weight # Balances Time vs Frequency importance
+        self.freq_weight = freq_weight
 
     def forward(self, preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         # ==========================================
@@ -37,6 +37,7 @@ class HybridrPPGLoss(nn.Module):
         # ==========================================
         best_pearson = -1.0 * torch.ones(preds.size(0), device=preds.device)
         
+        # Center the signals
         mean_t = torch.mean(targets, dim=1, keepdim=True)
         targets_centered = targets - mean_t
         std_t = torch.sqrt(torch.sum(targets_centered ** 2, dim=1) + 1e-8)
@@ -56,20 +57,25 @@ class HybridrPPGLoss(nn.Module):
         # ==========================================
         # 2. FREQUENCY DOMAIN: Power Spectrum Matching
         # ==========================================
-        # Calculate the real FFT of both signals
-        fft_preds = torch.fft.rfft(preds, dim=1)
-        fft_targets = torch.fft.rfft(targets, dim=1)
+        # FIX 1: ALWAYS use the centered predictions for FFT to kill the DC baseline
+        preds_for_fft = preds - torch.mean(preds, dim=1, keepdim=True)
+        targets_for_fft = targets - torch.mean(targets, dim=1, keepdim=True)
 
-        # Calculate Power Spectral Density (PSD)
+        fft_preds = torch.fft.rfft(preds_for_fft, dim=1)
+        fft_targets = torch.fft.rfft(targets_for_fft, dim=1)
+
         power_preds = torch.abs(fft_preds) ** 2
         power_targets = torch.abs(fft_targets) ** 2
 
-        # Normalize the spectra into probability distributions
+        # FIX 2: Drop the 0 Hz (DC) bin completely so it doesn't skew the SNR!
+        power_preds = power_preds[:, 1:]
+        power_targets = power_targets[:, 1:]
+
+        # Normalize into probability distributions
         prob_preds = power_preds / (torch.sum(power_preds, dim=1, keepdim=True) + 1e-8)
         prob_targets = power_targets / (torch.sum(power_targets, dim=1, keepdim=True) + 1e-8)
 
-        # Cross-Entropy Loss between the frequencies
-        # This forces the AI's frequency peak to exactly match the GT frequency peak
+        # Cross-Entropy Loss
         freq_loss = -torch.sum(prob_targets * torch.log(prob_preds + 1e-8), dim=1)
         freq_loss = torch.mean(freq_loss)
 
@@ -94,7 +100,7 @@ def train_model() -> None:
     # Initialization
     model = POSNet(num_rois=9).to(device)
     criterion = HybridrPPGLoss(max_shift=15, freq_weight=0.5)
-    
+
     # 1. Add weight_decay to prevent overfitting to noisy videos
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
     
