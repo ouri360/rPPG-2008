@@ -94,8 +94,8 @@ class FaceDetector:
                 if region_name == 'forehead':
                     slice_w = w_box // 3
                     # Draw two vertical lines
-                    cv2.line(frame, (x + slice_w, y), (x + slice_w, y + h_box), (0, 255, 0), 1)
-                    cv2.line(frame, (x + 2 * slice_w, y), (x + 2 * slice_w, y + h_box), (0, 255, 0), 1)
+                    cv2.line(frame, (x + slice_w, y), (x + slice_w, y + h_box - 6), (0, 255, 0), 1)
+                    cv2.line(frame, (x + 2 * slice_w, y), (x + 2 * slice_w, y + h_box - 6), (0, 255, 0), 1)
                 else:
                     slice_h = h_box // 3
                     # Draw two horizontal lines
