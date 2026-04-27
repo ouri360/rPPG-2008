@@ -20,11 +20,11 @@ from model import POSNet
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-class PolarityAgnosticPearsonLoss(nn.Module):
+class PhaseInvariantPearsonLoss(nn.Module):
     """
-    State-of-the-Art Time-Domain rPPG Loss.
-    - Phase-Invariant (Slides +/- 15 frames to fix Empatica hardware delay)
-    - Polarity-Agnostic (Uses Absolute Pearson to allow for optical wave inversion)
+    The empirically proven best Loss for short-window rPPG.
+    Forces strict phase consistency to prevent frequency-destroying wave inversions,
+    while sliding to accommodate hardware sensor delays.
     """
     def __init__(self, max_shift: int = 15) -> None:
         super().__init__()
@@ -33,14 +33,15 @@ class PolarityAgnosticPearsonLoss(nn.Module):
     def forward(self, preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         best_pearson = -1.0 * torch.ones(preds.size(0), device=preds.device)
         
-        # Center the Ground Truth
+        # Pre-compute target stats
         mean_t = torch.mean(targets, dim=1, keepdim=True)
         targets_centered = targets - mean_t
         std_t = torch.sqrt(torch.sum(targets_centered ** 2, dim=1) + 1e-8)
 
-        # Slide the prediction to find the perfect phase lock
+        # Slide the prediction back and forth to find the perfect phase lock
         for shift in range(-self.max_shift, self.max_shift + 1):
             preds_shifted = torch.roll(preds, shifts=shift, dims=1)
+            
             mean_p = torch.mean(preds_shifted, dim=1, keepdim=True)
             preds_centered = preds_shifted - mean_p
             std_p = torch.sqrt(torch.sum(preds_centered ** 2, dim=1) + 1e-8)
@@ -48,11 +49,9 @@ class PolarityAgnosticPearsonLoss(nn.Module):
             cov = torch.sum(preds_centered * targets_centered, dim=1)
             pearson = cov / (std_p * std_t)
             
-            # SOTA TRICK: torch.abs() ignores inverted signals. 
-            # A perfect upside-down wave is now graded as a perfect 1.0!
-            best_pearson = torch.maximum(best_pearson, torch.abs(pearson))
+            # STRICT POLARITY: No torch.abs() here! The wave must stay continuous.
+            best_pearson = torch.maximum(best_pearson, pearson)
             
-        # Minimize the loss -> maximize the best aligned absolute correlation
         return 1.0 - torch.mean(best_pearson)
 
 
@@ -214,7 +213,7 @@ def train_model() -> None:
     native_fps = dataset.target_fps
     logging.info(f"Training configured for {native_fps} FPS with sequence length {dynamic_seq_len}") 
 
-    criterion = PolarityAgnosticPearsonLoss(max_shift=15)
+    criterion = PhaseInvariantPearsonLoss(max_shift=15)
     
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
 
