@@ -41,7 +41,7 @@ class POSNet(nn.Module):
             nn.Linear(16, 8),
             nn.ReLU(inplace=True),
             nn.Linear(8, 1), 
-            nn.Softplus()
+            nn.Sigmoid()
         )
 
     def forward(self, x: Tensor) -> Tensor:
@@ -59,6 +59,9 @@ class POSNet(nn.Module):
         fused_signals = torch.sum(x * weights, dim=-1) 
         
         alpha = self.alpha_estimator(fused_signals) 
+
+        alpha = alpha * 3.0 
+
         alpha = alpha.unsqueeze(2) 
         
         s1 = fused_signals[:, 0:1, :] 
