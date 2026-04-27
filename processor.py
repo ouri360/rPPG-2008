@@ -83,31 +83,28 @@ class SignalProcessor:
         logging.info("SignalProcessor using to POS RGB Architecture.")
     
     def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict, timestamp: float) -> None:
-        b_channel, g_channel, r_channel = cv2.split(frame)
+        # We no longer need cv2.split or cv2.fillPoly here!
+        # 'rois' now contains the exact (B, G, R) color values directly from the detector.
         
-        global_g = [] # Pour maintenir la compatibilité avec self.raw_g
+        global_g = [] # For legacy Graph 1 support
         
-        for region_name, polygon in rois.items():
-            # Il faut créer un masque spécifique à la région courante
-            roi_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-            cv2.fillPoly(roi_mask, [polygon], 255)
+        for region_name in self.roi_keys:
+            color_bgr = rois.get(region_name)
             
-            # Extraction des pixels de CETTE région uniquement
-            r_pixels = r_channel[roi_mask == 255]
-            g_pixels = g_channel[roi_mask == 255]
-            b_pixels = b_channel[roi_mask == 255]
-            
-            if len(g_pixels) > 0:
-                self.rois_history[region_name]['r'].append(float(np.mean(r_pixels)))
-                self.rois_history[region_name]['g'].append(float(np.mean(g_pixels)))
-                self.rois_history[region_name]['b'].append(float(np.mean(b_pixels)))
-                global_g.extend(g_pixels)
+            if color_bgr is not None:
+                # Extracted colors are in BGR format from OpenCV
+                b, g, r = color_bgr[0], color_bgr[1], color_bgr[2]
+                
+                self.rois_history[region_name]['b'].append(float(b))
+                self.rois_history[region_name]['g'].append(float(g))
+                self.rois_history[region_name]['r'].append(float(r))
+                global_g.append(float(g))
             else:
                 self.rois_history[region_name]['r'].append(0.0)
                 self.rois_history[region_name]['g'].append(0.0)
                 self.rois_history[region_name]['b'].append(0.0)
 
-        # Maintien de la variable raw_g pour le Graph 1 et les checks de longueur
+        # Maintain raw_g for overall framerate checks and legacy systems
         if len(global_g) > 0:
             self.raw_g.append(float(np.mean(global_g)))
         else:
@@ -147,7 +144,8 @@ class SignalProcessor:
             
             C_rois[region_name] = np.vstack([r_u, g_u, b_u])
             
-        N = C_rois['forehead'].shape[1]
+        # Dynamically grabs the length of the first available region (e.g., 'forehead_1')
+        N = C_rois[self.roi_keys[0]].shape[1]
         L = int(self.target_fps * 1.6) 
         H = np.zeros(N)
         

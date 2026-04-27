@@ -19,35 +19,44 @@ from model import POSNet
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-class NegativePearsonLoss(nn.Module):
+class PhaseInvariantPearsonLoss(nn.Module):
     """
-    Computes the Negative Pearson Correlation Coefficient.
-    Used to compare the phase and frequency of two waveforms, ignoring scale.
+    Computes the Negative Pearson Correlation Coefficient while allowing
+    for a dynamic time-shift to compensate for hardware sensor delays.
     """
-
-    def __init__(self) -> None:
+    def __init__(self, max_shift: int = 15) -> None:
+        """
+        max_shift of 15 frames at 30 FPS = +/- 0.5 seconds of leniency
+        to account for the pulse transit time to the wrist.
+        """
         super().__init__()
+        self.max_shift = max_shift
 
     def forward(self, preds: Tensor, targets: Tensor) -> Tensor:
-        """
-        Args:
-            preds (Tensor): Predicted signals, shape (Batch, SeqLen).
-            targets (Tensor): Ground truth signals, shape (Batch, SeqLen).
-        """
-        mean_p = torch.mean(preds, dim=1, keepdim=True)
+        # best_pearson starts at -1.0 (worst possible correlation)
+        best_pearson = -1.0 * torch.ones(preds.size(0), device=preds.device)
+        
+        # Pre-compute target stats (Ground Truth)
         mean_t = torch.mean(targets, dim=1, keepdim=True)
-        
-        preds_centered = preds - mean_p
         targets_centered = targets - mean_t
-        
-        cov = torch.sum(preds_centered * targets_centered, dim=1)
-        std_p = torch.sqrt(torch.sum(preds_centered ** 2, dim=1) + 1e-8)
         std_t = torch.sqrt(torch.sum(targets_centered ** 2, dim=1) + 1e-8)
-        
-        pearson = cov / (std_p * std_t)
-        
-        # Minimize the loss -> maximize correlation (1.0 is perfect correlation)
-        return 1.0 - torch.mean(torch.abs(pearson))
+
+        # Slide the prediction back and forth to find the perfect phase lock
+        for shift in range(-self.max_shift, self.max_shift + 1):
+            preds_shifted = torch.roll(preds, shifts=shift, dims=1)
+            
+            mean_p = torch.mean(preds_shifted, dim=1, keepdim=True)
+            preds_centered = preds_shifted - mean_p
+            std_p = torch.sqrt(torch.sum(preds_centered ** 2, dim=1) + 1e-8)
+            
+            cov = torch.sum(preds_centered * targets_centered, dim=1)
+            pearson = cov / (std_p * std_t)
+            
+            # Keep the highest correlation found for each item in the batch
+            best_pearson = torch.maximum(best_pearson, pearson)
+            
+        # Minimize the loss -> maximize the best aligned correlation
+        return 1.0 - torch.mean(best_pearson)
 
 
 def train_model() -> None:
@@ -62,7 +71,7 @@ def train_model() -> None:
 
     # Initialization
     model = POSNet(num_rois=9).to(device)
-    criterion = NegativePearsonLoss()
+    criterion = PhaseInvariantPearsonLoss(max_shift=15)
 
     # 1. Add weight_decay to prevent overfitting to noisy videos
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)

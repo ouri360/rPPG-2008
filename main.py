@@ -68,12 +68,11 @@ def main():
                 timestamp = frame_counter / cam.fps
 
             # 1. ALWAYS Run Facial Extraction
-            rois = detector.get_face_mesh_rois(frame)
+            multi_rois = detector.get_face_mesh_rois(frame)
 
-            if rois:
-                processor.extract_and_buffer_multi(frame, rois, timestamp)
-                for name, polygon in rois.items():
-                    cv2.polylines(frame, [polygon], isClosed=True, color=(0, 255, 0), thickness=2)
+            if multi_rois:
+                # Just pass the colors directly to the processor, no drawing needed!
+                processor.extract_and_buffer_multi(frame, multi_rois, timestamp)
 
             # ==================================================
             # Asynchronous Heavy Math
