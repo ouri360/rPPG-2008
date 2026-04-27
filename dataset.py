@@ -133,26 +133,17 @@ class UBFCPhysDataset(Dataset):
             rois = detector.get_face_mesh_rois(frame)
             
             if rois:
-                b_channel, g_channel, r_channel = cv2.split(frame)
+                # We NO LONGER need to split the frame or draw polygons here!
+                # detector.py already did the heavy lifting and returned the mean BGR colors.
                 
                 for region_name in self.roi_keys:
-                    polygon = rois.get(region_name)
-                    if polygon is not None:
-                        roi_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-                        cv2.fillPoly(roi_mask, [polygon], 255)
-                        
-                        r_pixels = r_channel[roi_mask == 255]
-                        g_pixels = g_channel[roi_mask == 255]
-                        b_pixels = b_channel[roi_mask == 255]
-                        
-                        if len(g_pixels) > 0:
-                            rois_history[region_name]['r'].append(float(np.mean(r_pixels)))
-                            rois_history[region_name]['g'].append(float(np.mean(g_pixels)))
-                            rois_history[region_name]['b'].append(float(np.mean(b_pixels)))
-                        else:
-                            rois_history[region_name]['r'].append(0.0)
-                            rois_history[region_name]['g'].append(0.0)
-                            rois_history[region_name]['b'].append(0.0)
+                    color_bgr = rois.get(region_name)
+                    
+                    if color_bgr is not None:
+                        # OpenCV processes frames in BGR format
+                        rois_history[region_name]['b'].append(float(color_bgr[0]))
+                        rois_history[region_name]['g'].append(float(color_bgr[1]))
+                        rois_history[region_name]['r'].append(float(color_bgr[2]))
                     else:
                         rois_history[region_name]['r'].append(0.0)
                         rois_history[region_name]['g'].append(0.0)
@@ -161,6 +152,8 @@ class UBFCPhysDataset(Dataset):
                 video_timestamps.append(timestamp)
                 
             frame_idx += 1
+            if frame_idx % 1000 == 0:
+                logging.info(f"[{os.path.basename(video_path)}] Processed {frame_idx}/{total_frames} frames...")
                 
         cap.release()
 
