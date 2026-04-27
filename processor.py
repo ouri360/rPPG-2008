@@ -247,3 +247,14 @@ class SignalProcessor:
             return self.target_fps 
         return 1.0 / mean_diff
     
+    def get_latest_weights(self) -> dict:
+        """Returns the most recent spatial attention weights calculated by the neural network."""
+        # If the model hasn't calculated anything yet, return equal baseline weights
+        if not hasattr(self.pos_net, 'latest_weights') or self.pos_net.latest_weights is None:
+            return {k: 0.11 for k in self.roi_keys}
+            
+        # Get the weights from the very last sliding window evaluated
+        last_window_weights = self.pos_net.latest_weights[-1]
+        
+        # Map them back to the 9 region keys
+        return {key: float(last_window_weights[i]) for i, key in enumerate(self.roi_keys)}

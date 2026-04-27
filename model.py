@@ -45,29 +45,23 @@ class POSNet(nn.Module):
         )
 
     def forward(self, x: Tensor) -> Tensor:
-        # x shape: (Batch, Channels=2, SeqLen, ROIs=3)
         B, C, L, R = x.shape
         
-        # --- ETAPE 1 : FUSION SPATIALE INTELLIGENTE ---
-        # On donne au réseau les variances de S1 et S2 pour chaque région
-        var_features = torch.var(x, dim=2).view(B, -1) # Shape: (Batch, 6)
-        attention_weights = self.spatial_attention(var_features) # Shape: (Batch, 3)
+        var_features = torch.var(x, dim=2).view(B, -1) 
+        attention_weights = self.spatial_attention(var_features) 
         
-        # Appliquer les poids et fusionner les régions -> (Batch, Channels=2, SeqLen)
+        # --- Save the weights for the UI Visualizer ---
+        # We detach it so it doesn't mess with PyTorch gradients/training
+        self.latest_weights = attention_weights.detach().cpu().numpy()
+        
         weights = attention_weights.unsqueeze(1).unsqueeze(2)
         fused_signals = torch.sum(x * weights, dim=-1) 
         
-        # --- ETAPE 2 : ESTIMATION NEURONALE DE L'ALPHA ---
-        # Le réseau analyse le signal fusionné et prédit l'alpha optimal
-        alpha = self.alpha_estimator(fused_signals) # Shape: (Batch, 1)
-        alpha = alpha.unsqueeze(2) # Shape: (Batch, 1, 1) pour permettre la multiplication
+        alpha = self.alpha_estimator(fused_signals) 
+        alpha = alpha.unsqueeze(2) 
         
-        # --- ETAPE 3 : LA PHYSIQUE OPTIQUE (POS MATHS) ---
-        s1 = fused_signals[:, 0:1, :] # Shape: (Batch, 1, SeqLen)
-        s2 = fused_signals[:, 1:2, :] # Shape: (Batch, 1, SeqLen)
-        
-        # C'est la véritable équation POS, mais l'IA a trouvé l'alpha parfait
-        # en analysant la morphologie du bruit au lieu d'une simple division de variance.
+        s1 = fused_signals[:, 0:1, :] 
+        s2 = fused_signals[:, 1:2, :] 
         pulse = s1 + alpha * s2 
         
-        return pulse.squeeze(1) # Shape: (Batch, SeqLen)
+        return pulse.squeeze(1)

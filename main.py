@@ -67,8 +67,15 @@ def main():
             else:
                 timestamp = frame_counter / cam.fps
 
-            # 1. ALWAYS Run Facial Extraction
-            multi_rois = detector.get_face_mesh_rois(frame, draw=True)
+            # Get the real-time AI spatial weights from the processor
+            current_ai_weights = processor.get_latest_weights()
+
+            # Pass the weights into the detector to power the HUD
+            multi_rois = detector.get_face_mesh_rois(
+                frame, 
+                draw=True, 
+                ai_weights=current_ai_weights
+            )
 
             if multi_rois:
                 # Just pass the colors directly to the processor, no drawing needed!
