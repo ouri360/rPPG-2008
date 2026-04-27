@@ -64,6 +64,7 @@ class FaceDetector:
             face_clip_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
 
         for region_name, indices in original_rois.items():
+            # Get the exact mathematical hull
             pts = np.array([(int(landmarks[i].x * w), int(landmarks[i].y * h)) for i in indices], dtype=np.int32)
             hull = cv2.convexHull(pts)
 
@@ -71,13 +72,21 @@ class FaceDetector:
             cv2.fillPoly(master_mask, [hull], 255)
             x, y, w_box, h_box = cv2.boundingRect(hull)
 
-            # Draw the master face boundaries on our clipping mask
             if draw:
+                # Add to the global clipping mask
                 cv2.fillPoly(face_clip_mask, [hull], 255)
+                # RESTORED: Draw the true, original diagonal boundaries!
+                cv2.polylines(overlay, [hull], isClosed=True, color=(0, 255, 0), thickness=1)
 
             for i in range(3):
                 sub_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
                 sub_name = f"{region_name}_{i+1}"
+                
+                # Calculate AI weight intensity
+                intensity = 255
+                if draw and ai_weights:
+                    weight = ai_weights.get(sub_name, 0.11)
+                    intensity = int(min(weight * 3.0, 1.0) * 255)
                 
                 if region_name == 'forehead':
                     slice_w = w_box // 3
@@ -86,16 +95,12 @@ class FaceDetector:
                     cv2.rectangle(sub_mask, (x_start, y), (x_end, y + h_box), 255, -1)
                     
                     if draw:
-                        # Map AI weight (usually ~0.11 average) to a brightness level (0-255)
-                        intensity = 255 
-                        if ai_weights:
-                            weight = ai_weights.get(sub_name, 0.11)
-                            # Multiply by 3.0 to make the active regions visibly pop
-                            intensity = int(min(weight * 3.0, 1.0) * 255) 
-                            
-                        # Draw filled box, then a sharp grid line over it
+                        # Draw ONLY the opacity fill, no blocky rectangular borders!
                         cv2.rectangle(overlay, (x_start, y), (x_end, y + h_box), (0, intensity, 0), cv2.FILLED)
-                        cv2.rectangle(overlay, (x_start, y), (x_end, y + h_box), (0, 255, 0), 1)
+                        # Draw the inner grid lines
+                        if i < 2: 
+                            line_x = x + (i + 1) * slice_w
+                            cv2.line(overlay, (line_x, y), (line_x, y + h_box), (0, 255, 0), 1)
                         
                 else:
                     slice_h = h_box // 3
@@ -104,22 +109,20 @@ class FaceDetector:
                     cv2.rectangle(sub_mask, (x, y_start), (x + w_box, y_end), 255, -1)
                     
                     if draw:
-                        intensity = 255
-                        if ai_weights:
-                            weight = ai_weights.get(sub_name, 0.11)
-                            intensity = int(min(weight * 3.0, 1.0) * 255)
-                            
                         cv2.rectangle(overlay, (x, y_start), (x + w_box, y_end), (0, intensity, 0), cv2.FILLED)
-                        cv2.rectangle(overlay, (x, y_start), (x + w_box, y_end), (0, 255, 0), 1)
+                        if i < 2:
+                            line_y = y + (i + 1) * slice_h
+                            cv2.line(overlay, (x, line_y), (x + w_box, line_y), (0, 255, 0), 1)
 
+                # Execute the math
                 final_mask = cv2.bitwise_and(master_mask, sub_mask)
                 mean_color = cv2.mean(frame, mask=final_mask)[:3]
                 dynamic_rois[sub_name] = mean_color
 
         if draw:
-            # 2. Perfect, zero-latency clipping to the face shape
+            # 2. Perfect, zero-latency clipping. Trims off any boxes/lines that poke out of the hull!
             overlay = cv2.bitwise_and(overlay, overlay, mask=face_clip_mask)
-            # 3. Blend the UI onto the live feed (adjust 0.6 if you want it more/less see-through)
+            # 3. Blend the UI onto the live feed
             cv2.addWeighted(overlay, 0.6, frame, 1.0, 0, frame)
 
         return dynamic_rois
