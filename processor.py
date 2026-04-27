@@ -36,14 +36,21 @@ class SignalProcessor:
         self.raw_g = deque(maxlen=self.max_length)
         self.raw_b = deque(maxlen=self.max_length)
         
-        # In order to separately track the ROIs, we maintain a history of pixel values for each region.
+        # The 9 mathematically sliced regions
+        self.roi_keys = [
+            'forehead_1', 'forehead_2', 'forehead_3',
+            'left_cheek_1', 'left_cheek_2', 'left_cheek_3',
+            'right_cheek_1', 'right_cheek_2', 'right_cheek_3'
+        ]
+
+        # Dynamically create the history deque for all 9 regions
         self.rois_history = {
-            'forehead': {'r': deque(maxlen=self.max_length), 'g': deque(maxlen=self.max_length), 'b': deque(maxlen=self.max_length)},
-            'left_cheek': {'r': deque(maxlen=self.max_length), 'g': deque(maxlen=self.max_length), 'b': deque(maxlen=self.max_length)},
-            'right_cheek': {'r': deque(maxlen=self.max_length), 'g': deque(maxlen=self.max_length), 'b': deque(maxlen=self.max_length)}
+            key: {'r': deque(maxlen=self.max_length), 
+                  'g': deque(maxlen=self.max_length), 
+                  'b': deque(maxlen=self.max_length)}
+            for key in self.roi_keys
         }
 
-        
         # ==========================================
         # Load the trained POSNet
         # ==========================================
@@ -51,7 +58,7 @@ class SignalProcessor:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         # 2. Instanciation ET transfert du modèle vers la puce graphique (POSNet is a lightweight CNN)
-        self.pos_net = POSNet(num_rois=3).to(self.device)
+        self.pos_net = POSNet(num_rois=9).to(self.device).half()  # Use half precision for faster inference on compatible GPUs
         
         # 3. Chargement sécurisé avec `map_location` pour aligner la mémoire
         weights_path = 'pos_net_weights.pt'
@@ -144,12 +151,12 @@ class SignalProcessor:
         L = int(self.target_fps * 1.6) 
         H = np.zeros(N)
         
-        roi_keys = ['forehead', 'left_cheek', 'right_cheek']
+        roi_keys = self.roi_keys
         num_windows = N - L + 1
 
         # 1. Prepare a single MASSIVE batch tensor on the CPU for all windows
-        # Shape: (Batch_Size=num_windows, Channels=2, SeqLen=L, ROIs=3)
-        batch_input = np.zeros((num_windows, 2, L, 3), dtype=np.float32)
+        # Shape: (Batch_Size=num_windows, Channels=2, SeqLen=L, ROIs=9)
+        batch_input = np.zeros((num_windows, 2, L, 9), dtype=np.float32)
 
         for n in range(num_windows):
             for roi_idx, region_name in enumerate(roi_keys):
@@ -169,9 +176,9 @@ class SignalProcessor:
         with torch.no_grad():
             x_tensor = torch.from_numpy(batch_input)
             
-            # Send to GPU
+            # Send to GPU and convert to half precision for faster inference
             model_device = next(self.pos_net.parameters()).device
-            x_tensor = x_tensor.to(model_device)
+            x_tensor = x_tensor.to(model_device).half()  # Use half precision for faster inference
             
             # The GPU processes all 800+ windows simultaneously
             h_preds = self.pos_net(x_tensor) 

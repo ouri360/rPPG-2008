@@ -18,14 +18,14 @@ class POSNet(nn.Module):
     while the final output rigidly respects the optical physics equation.
     """
 
-    def __init__(self, num_rois: int = 3) -> None:
+    def __init__(self, num_rois: int = 9) -> None:
         super().__init__()
         
         # 1. Attention Spatiale: Reçoit la variance de S1 et S2 pour chaque ROI
         self.spatial_attention = nn.Sequential(
-            nn.Linear(num_rois * 2, 16),
+            nn.Linear(num_rois * 2, 32),
             nn.ReLU(inplace=True),
-            nn.Linear(16, num_rois),
+            nn.Linear(32, num_rois),
             nn.Softmax(dim=-1)
         )
         

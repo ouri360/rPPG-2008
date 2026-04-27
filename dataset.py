@@ -13,6 +13,8 @@ import numpy as np
 from torch.utils.data import Dataset
 from torch import Tensor
 from typing import List, Tuple
+import os                           
+import concurrent.futures
 
 from detector import FaceDetector
 from gt import GroundTruthReader
@@ -41,26 +43,41 @@ class UBFCPhysDataset(Dataset):
         
         # 1.6 seconds is the ideal window to capture at least one cardiac cycle 
         # for a broad pulse-rate range [40, 240] BPM.
-        self.seq_len = int(self.target_fps * 1.6)
+        self.seq_len = int(self.target_fps * 3)  # 3 seconds windows for more stable training (can be adjusted)
         
         logging.info(f"Auto-detected FPS: {self.target_fps:.1f}. Calculated SeqLen: {self.seq_len} frames.")
 
         self.x_data: List[Tensor] = []
         self.y_data: List[Tensor] = []
-        self.detector = FaceDetector()
-        self.roi_keys = ['forehead', 'left_cheek', 'right_cheek']
+        self.roi_keys = [
+            'forehead_1', 'forehead_2', 'forehead_3',
+            'left_cheek_1', 'left_cheek_2', 'left_cheek_3',
+            'right_cheek_1', 'right_cheek_2', 'right_cheek_3'
+        ]
         
-        # 2. Process all videos into memory
-        for vid_path, gt_path in zip(video_paths, gt_paths):
-            self._process_video(vid_path, gt_path)
+        # Determine how many CPU cores you have (Cap at 8 to prevent RAM overflow)
+        max_threads = min(os.cpu_count() or 4, 8)
+        logging.info(f"Accelerating extraction using {max_threads} parallel threads...")
+
+        # 2. Process multiple videos simultaneously
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
+            # Submit all videos to the thread pool
+            futures = [executor.submit(self._process_video, v, g) for v, g in zip(video_paths, gt_paths)]
+            
+            # Create ONE clean progress bar for the overall video count
+            with tqdm(total=len(video_paths), desc="Processing Videos", unit="vid") as pbar:
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        future.result() # Catch any errors that happen inside the thread
+                    except Exception as e:
+                        logging.error(f"Thread crashed: {e}")
+                    pbar.update(1)
             
         if not self.x_data:
             raise RuntimeError("No valid data could be extracted from the provided files.")
             
         self.x_data_tensor = torch.stack(self.x_data)
         self.y_data_tensor = torch.stack(self.y_data)
-
-        del self.detector # Free up memory
         
         logging.info(f"Dataset loaded: {len(self.x_data_tensor)} windows generated.")
 
@@ -80,6 +97,7 @@ class UBFCPhysDataset(Dataset):
         """
         Extracts frames, calculates RGB means for ROIs, aligns GT, and segments into windows.
         """
+        detector = FaceDetector()
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             logging.error(f"Could not open video: {video_path}")
@@ -104,47 +122,45 @@ class UBFCPhysDataset(Dataset):
         
         frame_idx = 0
         
-        # Wrap the while loop in a tqdm progress bar!
         logging.info(f"Processing: {video_path} ({total_frames} frames)")
-        with tqdm(total=total_frames, desc="Extracting ROIs", unit="frame") as pbar:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                    
-                timestamp = frame_idx / fps
-                rois = self.detector.get_face_mesh_rois(frame)
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
                 
-                if rois:
-                    b_channel, g_channel, r_channel = cv2.split(frame)
-                    
-                    for region_name in self.roi_keys:
-                        polygon = rois.get(region_name)
-                        if polygon is not None:
-                            roi_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-                            cv2.fillPoly(roi_mask, [polygon], 255)
-                            
-                            r_pixels = r_channel[roi_mask == 255]
-                            g_pixels = g_channel[roi_mask == 255]
-                            b_pixels = b_channel[roi_mask == 255]
-                            
-                            if len(g_pixels) > 0:
-                                rois_history[region_name]['r'].append(float(np.mean(r_pixels)))
-                                rois_history[region_name]['g'].append(float(np.mean(g_pixels)))
-                                rois_history[region_name]['b'].append(float(np.mean(b_pixels)))
-                            else:
-                                rois_history[region_name]['r'].append(0.0)
-                                rois_history[region_name]['g'].append(0.0)
-                                rois_history[region_name]['b'].append(0.0)
+            timestamp = frame_idx / fps
+            rois = detector.get_face_mesh_rois(frame)
+            
+            if rois:
+                b_channel, g_channel, r_channel = cv2.split(frame)
+                
+                for region_name in self.roi_keys:
+                    polygon = rois.get(region_name)
+                    if polygon is not None:
+                        roi_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+                        cv2.fillPoly(roi_mask, [polygon], 255)
+                        
+                        r_pixels = r_channel[roi_mask == 255]
+                        g_pixels = g_channel[roi_mask == 255]
+                        b_pixels = b_channel[roi_mask == 255]
+                        
+                        if len(g_pixels) > 0:
+                            rois_history[region_name]['r'].append(float(np.mean(r_pixels)))
+                            rois_history[region_name]['g'].append(float(np.mean(g_pixels)))
+                            rois_history[region_name]['b'].append(float(np.mean(b_pixels)))
                         else:
                             rois_history[region_name]['r'].append(0.0)
                             rois_history[region_name]['g'].append(0.0)
                             rois_history[region_name]['b'].append(0.0)
-                            
-                    video_timestamps.append(timestamp)
-                    
-                frame_idx += 1
-                pbar.update(1)  # Advance the progress bar by 1 frame
+                    else:
+                        rois_history[region_name]['r'].append(0.0)
+                        rois_history[region_name]['g'].append(0.0)
+                        rois_history[region_name]['b'].append(0.0)
+                        
+                video_timestamps.append(timestamp)
+                
+            frame_idx += 1
                 
         cap.release()
 

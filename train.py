@@ -61,11 +61,16 @@ def train_model() -> None:
     logging.info(f"Starting training on device: {device}")
 
     # Initialization
-    model = POSNet(num_rois=3).to(device)
+    model = POSNet(num_rois=9).to(device)
     criterion = NegativePearsonLoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    # FIXED: Renamed to clearly identify this as the dataset cache, not model weights
+    # 1. Add weight_decay to prevent overfitting to noisy videos
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    
+    # 2. Add a scheduler to gently lower the learning rate over 80 epochs
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
+
+    # Identify this as the dataset cache, not model weights
     cache_path = 'preprocessed_ubfc_dataset.pt'
 
     if os.path.exists(cache_path):
@@ -83,12 +88,36 @@ def train_model() -> None:
             "dataset/UBFC-Phys-S2/vid_s2_T1.avi",
             "dataset/UBFC-Phys-S2/vid_s2_T2.avi",
             "dataset/UBFC-Phys-S2/vid_s2_T3.avi",
-            "dataset/UBFC-Phys-S1/vid_s1_T1.avi",
-            "dataset/UBFC-Phys-S1/vid_s1_T2.avi",
-            "dataset/UBFC-Phys-S1/vid_s1_T3.avi",
-            "dataset/UBFC-Phys-S2/vid_s2_T1.avi",
-            "dataset/UBFC-Phys-S2/vid_s2_T2.avi",
-            "dataset/UBFC-Phys-S2/vid_s2_T3.avi",
+            "dataset/UBFC-Phys-S3/vid_s3_T1.avi",
+            "dataset/UBFC-Phys-S3/vid_s3_T2.avi",
+            "dataset/UBFC-Phys-S3/vid_s3_T3.avi",
+            "dataset/UBFC-Phys-S4/vid_s4_T1.avi",
+            "dataset/UBFC-Phys-S4/vid_s4_T2.avi",
+            "dataset/UBFC-Phys-S4/vid_s4_T3.avi",
+            "dataset/UBFC-Phys-S5/vid_s5_T1.avi",
+            "dataset/UBFC-Phys-S5/vid_s5_T2.avi",
+            "dataset/UBFC-Phys-S5/vid_s5_T3.avi",
+            "dataset/UBFC-Phys-S6/vid_s6_T1.avi",
+            "dataset/UBFC-Phys-S6/vid_s6_T2.avi",
+            "dataset/UBFC-Phys-S6/vid_s6_T3.avi",
+            "dataset/UBFC-Phys-S7/vid_s7_T1.avi",
+            "dataset/UBFC-Phys-S7/vid_s7_T2.avi",
+            "dataset/UBFC-Phys-S7/vid_s7_T3.avi",
+            "dataset/UBFC-Phys-S8/vid_s8_T1.avi",
+            "dataset/UBFC-Phys-S8/vid_s8_T2.avi",
+            "dataset/UBFC-Phys-S8/vid_s8_T3.avi",
+            "dataset/UBFC-Phys-S9/vid_s9_T1.avi",
+            "dataset/UBFC-Phys-S9/vid_s9_T2.avi",
+            "dataset/UBFC-Phys-S9/vid_s9_T3.avi",
+            "dataset/UBFC-Phys-S10/vid_s10_T1.avi",
+            "dataset/UBFC-Phys-S10/vid_s10_T2.avi",
+            "dataset/UBFC-Phys-S10/vid_s10_T3.avi",
+            "dataset/UBFC-Phys-S11/vid_s11_T1.avi",
+            "dataset/UBFC-Phys-S11/vid_s11_T2.avi",
+            "dataset/UBFC-Phys-S11/vid_s11_T3.avi",
+            "dataset/UBFC-Phys-S12/vid_s12_T1.avi",
+            "dataset/UBFC-Phys-S12/vid_s12_T2.avi",
+            "dataset/UBFC-Phys-S12/vid_s12_T3.avi",
             "dataset/UBFC-rPPG-Set1-Not_Moving/vid_subject5.avi",
             "dataset/UBFC-rPPG-Set1-Not_Moving/vid_subject6.avi",
             "dataset/UBFC-rPPG-Set1-Not_Moving/vid_subject7.avi",
@@ -99,7 +128,13 @@ def train_model() -> None:
             "dataset/UBFC-rPPG-Set2-Realistic/vid_subject1.avi",
             "dataset/UBFC-rPPG-Set2-Realistic/vid_subject3.avi",
             "dataset/UBFC-rPPG-Set2-Realistic/vid_subject4.avi",
-            "dataset/UBFC-rPPG-Set2-Realistic/vid_subject9.avi"
+            "dataset/UBFC-rPPG-Set2-Realistic/vid_subject9.avi",
+            "dataset/UBFC-rPPG-Set2-Realistic/vid_subject20.avi",
+            "dataset/UBFC-rPPG-Set2-Realistic/vid_subject23.avi",
+            "dataset/UBFC-rPPG-Set2-Realistic/vid_subject24.avi",
+            "dataset/UBFC-rPPG-Set2-Realistic/vid_subject30.avi",
+            "dataset/UBFC-rPPG-Set2-Realistic/vid_subject31.avi",
+            "dataset/UBFC-rPPG-Set2-Realistic/vid_subject32.avi"
         ]
 
         gt_files = [
@@ -109,12 +144,36 @@ def train_model() -> None:
             "dataset/UBFC-Phys-S2/bvp_s2_T1.csv",
             "dataset/UBFC-Phys-S2/bvp_s2_T2.csv",
             "dataset/UBFC-Phys-S2/bvp_s2_T3.csv",
-            "dataset/UBFC-Phys-S1/bvp_s1_T1.csv",
-            "dataset/UBFC-Phys-S1/bvp_s1_T2.csv",
-            "dataset/UBFC-Phys-S1/bvp_s1_T3.csv",
-            "dataset/UBFC-Phys-S2/bvp_s2_T1.csv",
-            "dataset/UBFC-Phys-S2/bvp_s2_T2.csv",
-            "dataset/UBFC-Phys-S2/bvp_s2_T3.csv",
+            "dataset/UBFC-Phys-S3/bvp_s3_T1.csv",
+            "dataset/UBFC-Phys-S3/bvp_s3_T2.csv",
+            "dataset/UBFC-Phys-S3/bvp_s3_T3.csv",
+            "dataset/UBFC-Phys-S4/bvp_s4_T1.csv",
+            "dataset/UBFC-Phys-S4/bvp_s4_T2.csv",
+            "dataset/UBFC-Phys-S4/bvp_s4_T3.csv",
+            "dataset/UBFC-Phys-S5/bvp_s5_T1.csv",
+            "dataset/UBFC-Phys-S5/bvp_s5_T2.csv",
+            "dataset/UBFC-Phys-S5/bvp_s5_T3.csv",
+            "dataset/UBFC-Phys-S6/bvp_s6_T1.csv",
+            "dataset/UBFC-Phys-S6/bvp_s6_T2.csv",
+            "dataset/UBFC-Phys-S6/bvp_s6_T3.csv",
+            "dataset/UBFC-Phys-S7/bvp_s7_T1.csv",
+            "dataset/UBFC-Phys-S7/bvp_s7_T2.csv",
+            "dataset/UBFC-Phys-S7/bvp_s7_T3.csv",
+            "dataset/UBFC-Phys-S8/bvp_s8_T1.csv",
+            "dataset/UBFC-Phys-S8/bvp_s8_T2.csv",
+            "dataset/UBFC-Phys-S8/bvp_s8_T3.csv",
+            "dataset/UBFC-Phys-S9/bvp_s9_T1.csv",
+            "dataset/UBFC-Phys-S9/bvp_s9_T2.csv",
+            "dataset/UBFC-Phys-S9/bvp_s9_T3.csv",
+            "dataset/UBFC-Phys-S10/bvp_s10_T1.csv",
+            "dataset/UBFC-Phys-S10/bvp_s10_T2.csv",
+            "dataset/UBFC-Phys-S10/bvp_s10_T3.csv",
+            "dataset/UBFC-Phys-S11/bvp_s11_T1.csv",
+            "dataset/UBFC-Phys-S11/bvp_s11_T2.csv",
+            "dataset/UBFC-Phys-S11/bvp_s11_T3.csv",
+            "dataset/UBFC-Phys-S12/bvp_s12_T1.csv",
+            "dataset/UBFC-Phys-S12/bvp_s12_T2.csv",
+            "dataset/UBFC-Phys-S12/bvp_s12_T3.csv",
             "dataset/UBFC-rPPG-Set1-Not_Moving/gt_subject5.xmp",
             "dataset/UBFC-rPPG-Set1-Not_Moving/gt_subject6.xmp",
             "dataset/UBFC-rPPG-Set1-Not_Moving/gt_subject7.xmp",
@@ -125,7 +184,13 @@ def train_model() -> None:
             "dataset/UBFC-rPPG-Set2-Realistic/gt_subject1.txt",
             "dataset/UBFC-rPPG-Set2-Realistic/gt_subject3.txt",
             "dataset/UBFC-rPPG-Set2-Realistic/gt_subject4.txt",
-            "dataset/UBFC-rPPG-Set2-Realistic/gt_subject9.txt"
+            "dataset/UBFC-rPPG-Set2-Realistic/gt_subject9.txt",
+            "dataset/UBFC-rPPG-Set2-Realistic/gt_subject20.txt",
+            "dataset/UBFC-rPPG-Set2-Realistic/gt_subject23.txt",
+            "dataset/UBFC-rPPG-Set2-Realistic/gt_subject24.txt",
+            "dataset/UBFC-rPPG-Set2-Realistic/gt_subject30.txt",
+            "dataset/UBFC-rPPG-Set2-Realistic/gt_subject31.txt",
+            "dataset/UBFC-rPPG-Set2-Realistic/gt_subject32.txt"
         ]
 
         # Initialize the actual dataset
@@ -169,6 +234,7 @@ def train_model() -> None:
             epoch_loss += loss.item()
             
         avg_loss = epoch_loss / len(dataloader)
+        scheduler.step()
         
         if (epoch + 1) % 5 == 0:
             logging.info(f"Epoch [{epoch + 1}/{epochs}] - Loss: {avg_loss:.4f}")
