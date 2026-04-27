@@ -75,8 +75,9 @@ class HybridrPPGLoss(nn.Module):
         prob_preds = power_preds / (torch.sum(power_preds, dim=1, keepdim=True) + 1e-8)
         prob_targets = power_targets / (torch.sum(power_targets, dim=1, keepdim=True) + 1e-8)
 
-        # Cross-Entropy Loss
-        freq_loss = -torch.sum(prob_targets * torch.log(prob_preds + 1e-8), dim=1)
+        # KL-Divergence Loss (Minimum score is exactly 0.0)
+        # We subtract the target's own chaos so we are only grading the AI's mistakes.
+        freq_loss = torch.sum(prob_targets * (torch.log(prob_targets + 1e-8) - torch.log(prob_preds + 1e-8)), dim=1)
         freq_loss = torch.mean(freq_loss)
 
         # ==========================================
@@ -99,7 +100,7 @@ def train_model() -> None:
 
     # Initialization
     model = POSNet(num_rois=9).to(device)
-    criterion = HybridrPPGLoss(max_shift=15, freq_weight=0.5)
+    criterion = HybridrPPGLoss(max_shift=15, freq_weight=0.2)
 
     # 1. Add weight_decay to prevent overfitting to noisy videos
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
@@ -266,6 +267,10 @@ def train_model() -> None:
             
             # Backward pass and optimize
             loss.backward()
+
+            # UPGRADE: Gradient Clipping to protect against sudden motion spikes
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+
             optimizer.step()
             
             epoch_loss += loss.item()
