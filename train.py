@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch import Tensor
+import torch.fft
 
 from dataset import UBFCPhysDataset
 from model import POSNet
@@ -19,44 +20,65 @@ from model import POSNet
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-class PhaseInvariantPearsonLoss(nn.Module):
+class HybridrPPGLoss(nn.Module):
     """
-    Computes the Negative Pearson Correlation Coefficient while allowing
-    for a dynamic time-shift to compensate for hardware sensor delays.
+    State-of-the-Art rPPG Loss Function.
+    Combines Phase-Invariant time-domain correlation with 
+    Frequency-Domain Power Spectrum matching (SNR optimization).
     """
-    def __init__(self, max_shift: int = 15) -> None:
-        """
-        max_shift of 15 frames at 30 FPS = +/- 0.5 seconds of leniency
-        to account for the pulse transit time to the wrist.
-        """
+    def __init__(self, max_shift: int = 15, freq_weight: float = 0.5) -> None:
         super().__init__()
         self.max_shift = max_shift
+        self.freq_weight = freq_weight # Balances Time vs Frequency importance
 
-    def forward(self, preds: Tensor, targets: Tensor) -> Tensor:
-        # best_pearson starts at -1.0 (worst possible correlation)
+    def forward(self, preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        # ==========================================
+        # 1. TIME DOMAIN: Phase-Invariant Pearson
+        # ==========================================
         best_pearson = -1.0 * torch.ones(preds.size(0), device=preds.device)
         
-        # Pre-compute target stats (Ground Truth)
         mean_t = torch.mean(targets, dim=1, keepdim=True)
         targets_centered = targets - mean_t
         std_t = torch.sqrt(torch.sum(targets_centered ** 2, dim=1) + 1e-8)
 
-        # Slide the prediction back and forth to find the perfect phase lock
         for shift in range(-self.max_shift, self.max_shift + 1):
             preds_shifted = torch.roll(preds, shifts=shift, dims=1)
-            
             mean_p = torch.mean(preds_shifted, dim=1, keepdim=True)
             preds_centered = preds_shifted - mean_p
             std_p = torch.sqrt(torch.sum(preds_centered ** 2, dim=1) + 1e-8)
             
             cov = torch.sum(preds_centered * targets_centered, dim=1)
             pearson = cov / (std_p * std_t)
-            
-            # Keep the highest correlation found for each item in the batch
             best_pearson = torch.maximum(best_pearson, pearson)
             
-        # Minimize the loss -> maximize the best aligned correlation
-        return 1.0 - torch.mean(best_pearson)
+        time_loss = 1.0 - torch.mean(best_pearson)
+
+        # ==========================================
+        # 2. FREQUENCY DOMAIN: Power Spectrum Matching
+        # ==========================================
+        # Calculate the real FFT of both signals
+        fft_preds = torch.fft.rfft(preds, dim=1)
+        fft_targets = torch.fft.rfft(targets, dim=1)
+
+        # Calculate Power Spectral Density (PSD)
+        power_preds = torch.abs(fft_preds) ** 2
+        power_targets = torch.abs(fft_targets) ** 2
+
+        # Normalize the spectra into probability distributions
+        prob_preds = power_preds / (torch.sum(power_preds, dim=1, keepdim=True) + 1e-8)
+        prob_targets = power_targets / (torch.sum(power_targets, dim=1, keepdim=True) + 1e-8)
+
+        # Cross-Entropy Loss between the frequencies
+        # This forces the AI's frequency peak to exactly match the GT frequency peak
+        freq_loss = -torch.sum(prob_targets * torch.log(prob_preds + 1e-8), dim=1)
+        freq_loss = torch.mean(freq_loss)
+
+        # ==========================================
+        # 3. HYBRID FUSION
+        # ==========================================
+        total_loss = (1.0 - self.freq_weight) * time_loss + (self.freq_weight) * freq_loss
+        
+        return total_loss
 
 
 def train_model() -> None:
@@ -71,8 +93,8 @@ def train_model() -> None:
 
     # Initialization
     model = POSNet(num_rois=9).to(device)
-    criterion = PhaseInvariantPearsonLoss(max_shift=15)
-
+    criterion = HybridrPPGLoss(max_shift=15, freq_weight=0.5)
+    
     # 1. Add weight_decay to prevent overfitting to noisy videos
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
     
