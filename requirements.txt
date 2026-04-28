@@ -70,3 +70,31 @@ torchvision==0.26.0+cu128
 tqdm==4.67.3
 triton==3.6.0
 typing_extensions==4.15.0
+
+# For the JETSON Only : 
+numpy<2.0.0
+scipy
+pandas
+mediapipe==0.10.18
+tqdm
+onnx
+onnxscript
+
+# 1. Create the environment with system site packages enabled
+python3 -m venv .venv --system-site-packages
+
+# 2. Activate it
+source .venv/bin/activate
+
+# pip install -r requirements_JETSON.txt
+
+# Install Jetson-specific PyTorch dependencies
+pip install setuptools Cython wheel
+
+# Download and install the Nvidia Jetson PyTorch wheel
+wget https://developer.download.nvidia.com/compute/redist/jp/v62/pytorch/torch-2.5.0a0+872d972e41.nv24.08-cp310-cp310-linux_aarch64.whl
+pip install torch-2.5.0a0+872d972e41.nv24.08-cp310-cp310-linux_aarch64.whl
+
+# Install the Nvidia Jetson ONNX Runtime wheel
+wget https://developer.download.nvidia.com/compute/redist/jp/v62/onnxruntime/onnxruntime_gpu-1.19.2-cp310-cp310-linux_aarch64.whl
+pip install onnxruntime_gpu-1.19.2-cp310-cp310-linux_aarch64.whl
