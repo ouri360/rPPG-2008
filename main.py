@@ -62,7 +62,7 @@ def main():
             h, w = frame.shape[:2]
             
             # Define all coordinates
-            box_y1, box_y2 = h - 90, h - 10
+            box_y1, box_y2 = h - 110, h - 10
             box_x1, box_x2 = 10, 320
             
             ecg_w, ecg_h = 400, 100
@@ -108,6 +108,10 @@ def main():
             cv2.putText(frame, "POS ENGINE TELEMETRY", (box_x1 + 10, box_y1 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             cv2.putText(frame, f"Math Alpha : {math_alpha:.3f}", (box_x1 + 10, box_y1 + 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
             cv2.putText(frame, f"AI Alpha   : {ai_alpha:.3f}", (box_x1 + 10, box_y1 + 75), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+            # --- NEW: Draw the active Hardware Backend ---
+            backend_name = processor.get_backend_name()
+            cv2.putText(frame, f"[{backend_name}]", (box_x1 + 10, box_y1 + 95), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 100, 100), 1)
 
             # --- C. The ECG Waveform ---
             filtered_signal = processor.get_filtered_signal()

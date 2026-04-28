@@ -5,8 +5,6 @@ Runs the rPPG pipeline silently over a dataset, compares the estimated BPM
 to the medical ground truth every 15 frames, and calculates academic metrics.
 """
 
-import cv2
-import time
 import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr

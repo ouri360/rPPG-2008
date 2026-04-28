@@ -15,7 +15,12 @@ env/
 dataset/
 output/
 rppg_test/
-pos_net_weights.pth
+pos_net.onnx.data
+pos_net.onnx
+trt_cache/
+
+
+
 
 # VS Code & OS
 .vscode/

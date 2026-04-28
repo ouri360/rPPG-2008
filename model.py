@@ -12,18 +12,12 @@ from torch import Tensor
 
 
 class POSNet(nn.Module):
-    """
-    True Hybrid Physics-Informed Neural Network for rPPG.
-    The AI acts as a smart estimator for spatial weights and the POS Alpha value,
-    while the final output rigidly respects the optical physics equation.
-    """
-
-    def __init__(self, num_rois: int = 9) -> None:
+    # Added the return_telemetry flag
+    def __init__(self, num_rois: int = 9, return_telemetry: bool = False) -> None:
         super().__init__()
+        self.return_telemetry = return_telemetry
         
-        # 1. Attention Spatiale: Reçoit l'écart-type (Standard Deviation) de S1 et S2
         self.spatial_attention = nn.Sequential(
-            # THE FIX: This amplifier forces the AI to look at the dynamic noise!
             nn.BatchNorm1d(num_rois * 2), 
             nn.Linear(num_rois * 2, 32),
             nn.ReLU(inplace=True),
@@ -31,7 +25,6 @@ class POSNet(nn.Module):
             nn.Softmax(dim=-1)
         )
         
-        # 2. Estimateur d'Alpha
         self.alpha_estimator = nn.Sequential(
             nn.Conv1d(in_channels=2, out_channels=16, kernel_size=5, padding=2),
             nn.BatchNorm1d(16),
@@ -41,32 +34,36 @@ class POSNet(nn.Module):
             nn.Linear(16, 8),
             nn.ReLU(inplace=True),
             nn.Linear(8, 1), 
-            nn.Softplus()
+            nn.Softplus() # Locked to Iteration 6
         )
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor):
         B, C, L, R = x.shape
         
-        # --- THE FIX: Use standard deviation instead of variance ---
-        # std keeps the noise on the same scale as the signal, preventing vanishing features.
         std_features = torch.std(x, dim=2).view(B, -1) 
         attention_weights = self.spatial_attention(std_features) 
         
-        # Save the weights for the UI Visualizer
-        self.latest_weights = attention_weights.detach().cpu().numpy()
+        if not self.return_telemetry:
+            # Native PyTorch telemetry caching
+            self.latest_weights = attention_weights.detach().cpu().numpy()
         
         weights = attention_weights.unsqueeze(1).unsqueeze(2)
         fused_signals = torch.sum(x * weights, dim=-1) 
         
         alpha = self.alpha_estimator(fused_signals) 
         
-        # --- NEW: Save the AI's Alpha for the UI ---
-        self.latest_alpha = alpha.detach().cpu().numpy()
-
+        if not self.return_telemetry:
+            # Native PyTorch telemetry caching
+            self.latest_alpha = alpha.detach().cpu().numpy()
+            
         alpha = alpha.unsqueeze(2) 
         
         s1 = fused_signals[:, 0:1, :] 
         s2 = fused_signals[:, 1:2, :] 
         pulse = s1 + alpha * s2 
         
+        # ONNX EXPORT PATH: Send the variables directly out of the network
+        if self.return_telemetry:
+            return pulse.squeeze(1), attention_weights, alpha.squeeze(2)
+            
         return pulse.squeeze(1)
