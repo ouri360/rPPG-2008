@@ -60,13 +60,41 @@ def main():
             # 3. PURE OPENCV ZERO-LATENCY DASHBOARD
             # ==================================================
             h, w = frame.shape[:2]
-            overlay = frame.copy()
+            
+            # Define all coordinates
+            box_y1, box_y2 = h - 90, h - 10
+            box_x1, box_x2 = 10, 320
+            
+            ecg_w, ecg_h = 400, 100
+            ecg_x1, ecg_y1 = w - ecg_w - 10, h - ecg_h - 10
+            ecg_x2, ecg_y2 = w - 10, h - 10
+            
+            bar_x1, bar_y1 = w - 40, ecg_y1 - 160
+            bar_x2, bar_y2 = w - 10, ecg_y1 - 10
 
+            # --------------------------------------------------
+            # LAYER 1: Semi-Transparent Backgrounds
+            # --------------------------------------------------
+            overlay = frame.copy()
+            
+            # Draw the dark backing boxes on the overlay
+            cv2.rectangle(overlay, (box_x1, box_y1), (box_x2, box_y2), (0, 0, 0), -1) # Telemetry box
+            cv2.rectangle(overlay, (ecg_x1, ecg_y1), (ecg_x2, ecg_y2), (0, 0, 0), -1) # ECG box
+            cv2.rectangle(overlay, (bar_x1, bar_y1), (bar_x2, bar_y2), (50, 50, 50), -1) # SNR background
+            
+            # Blend the backgrounds onto the frame at 60% opacity
+            cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+
+            # --------------------------------------------------
+            # LAYER 2: 100% Opaque Text and Graphics
+            # --------------------------------------------------
+            
             # --- A. Basic Text Info ---
             fps = processor.get_current_fps()
             cv2.putText(frame, f"FPS: {fps:.1f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
             if last_calculated_bpm is not None:
+                # This is now 100% solid, glowing red!
                 cv2.putText(frame, f"Est BPM: {last_calculated_bpm:.1f}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
             else:
                 cv2.putText(frame, "Calc BPM...", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
@@ -75,54 +103,34 @@ def main():
             if gt_hr is not None:
                 cv2.putText(frame, f"True HR: {gt_hr:.1f}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-            # --- B. The Engine Telemetry Box (Bottom Left) ---
-            box_y1, box_y2 = h - 90, h - 10
-            box_x1, box_x2 = 10, 235
-            
-            cv2.rectangle(overlay, (box_x1, box_y1), (box_x2, box_y2), (0, 0, 0), -1)
+            # --- B. Engine Telemetry Text ---
             math_alpha, ai_alpha = processor.get_alpha_telemetry()
-            
-            cv2.putText(overlay, "POS ENGINE TELEMETRY", (box_x1 + 10, box_y1 + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            cv2.putText(overlay, f"Math Alpha : {math_alpha:.3f}", (box_x1 + 10, box_y1 + 47), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-            cv2.putText(overlay, f"AI Alpha   : {ai_alpha:.3f}", (box_x1 + 10, box_y1 + 72), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            cv2.putText(frame, "POS ENGINE TELEMETRY", (box_x1 + 10, box_y1 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            cv2.putText(frame, f"Math Alpha : {math_alpha:.3f}", (box_x1 + 10, box_y1 + 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+            cv2.putText(frame, f"AI Alpha   : {ai_alpha:.3f}", (box_x1 + 10, box_y1 + 75), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-            # --- C. The ECG Waveform (Bottom Right) ---
-            ecg_w, ecg_h = 400, 100
-            ecg_x1, ecg_y1 = w - ecg_w - 10, h - ecg_h - 10
-            ecg_x2, ecg_y2 = w - 10, h - 10
-            
-            cv2.rectangle(overlay, (ecg_x1, ecg_y1), (ecg_x2, ecg_y2), (0, 0, 0), -1)
-            
+            # --- C. The ECG Waveform ---
             filtered_signal = processor.get_filtered_signal()
             if filtered_signal is not None and len(filtered_signal) > 30:
-                # Grab the last ~3 seconds of the wave for display
                 display_pts = int(cam.fps * 3)
                 wave_slice = filtered_signal[-display_pts:]
                 
-                # NumPy Broadcasting to map the wave to pixel coordinates instantly
                 min_val, max_val = np.min(wave_slice), np.max(wave_slice)
                 normalized_wave = (wave_slice - min_val) / (max_val - min_val + 1e-8)
                 
-                pts_y = ecg_y2 - (normalized_wave * ecg_h * 0.8) - (ecg_h * 0.1) # 10% padding
+                pts_y = ecg_y2 - (normalized_wave * ecg_h * 0.8) - (ecg_h * 0.1) 
                 pts_x = np.linspace(ecg_x1, ecg_x2, len(pts_y))
                 
-                # Format for cv2.polylines
                 pts = np.vstack((pts_x, pts_y)).T.reshape((-1, 1, 2)).astype(np.int32)
-                cv2.polylines(overlay, [pts], isClosed=False, color=(0, 255, 0), thickness=2)
+                # Drawn on 'frame', making the green line brilliant and crisp
+                cv2.polylines(frame, [pts], isClosed=False, color=(0, 255, 0), thickness=2)
 
-            # --- D. The SNR Confidence Bar (Right Edge) ---
+            # --- D. The SNR Confidence Bar ---
             if last_filt_mag is not None:
-                bar_x1, bar_y1 = w - 40, ecg_y1 - 160
-                bar_x2, bar_y2 = w - 10, ecg_y1 - 10
-                
-                # Calculate Signal-to-Noise Ratio (Peak vs Average Noise)
                 snr = np.max(last_filt_mag) / (np.mean(last_filt_mag) + 1e-8)
-                
-                # Map SNR (2.0 to 6.0) to a fill percentage (0% to 100%)
                 fill_pct = np.clip((snr - 2.0) / 4.0, 0.0, 1.0)
                 fill_h = int(fill_pct * (bar_y2 - bar_y1))
                 
-                # Dynamic Color: Red (Bad) -> Yellow (Okay) -> Green (Good)
                 if fill_pct < 0.4:
                     bar_color = (0, 0, 255)
                 elif fill_pct < 0.7:
@@ -130,14 +138,10 @@ def main():
                 else:
                     bar_color = (0, 255, 0)
                 
-                # Draw Background, Fill, and Border
-                cv2.rectangle(overlay, (bar_x1, bar_y1), (bar_x2, bar_y2), (50, 50, 50), -1)
-                cv2.rectangle(overlay, (bar_x1, bar_y2 - fill_h), (bar_x2, bar_y2), bar_color, -1)
-                cv2.rectangle(overlay, (bar_x1, bar_y1), (bar_x2, bar_y2), (255, 255, 255), 1)
-                cv2.putText(overlay, "SNR", (bar_x1 - 5, bar_y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-
-            # Apply the transparent blend once for all UI elements
-            cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+                # Draw solid color fill and white border
+                cv2.rectangle(frame, (bar_x1, bar_y2 - fill_h), (bar_x2, bar_y2), bar_color, -1)
+                cv2.rectangle(frame, (bar_x1, bar_y1), (bar_x2, bar_y2), (255, 255, 255), 1)
+                cv2.putText(frame, "SNR", (bar_x1 - 5, bar_y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
 
             # Show the final frame
             cv2.imshow("Jetson Orin - rPPG Medical Dashboard", frame)
