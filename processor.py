@@ -22,6 +22,47 @@ HIGHCUT_HZ = 3.0        # Raised to 180 BPM to capture elevated heart rates
 ORDER = 3               # Standardized order for steep frequency cutoffs
 NFFT = 8192             
 
+
+class BiologicalHRTracker:
+    """
+    State-of-the-Art post-processing filter for rPPG.
+    Replaces naive argmax with biological momentum tracking to ignore motion spikes.
+    """
+    def __init__(self, max_jump: float = 15.0):
+        self.max_jump = max_jump # Maximum realistic BPM change per second
+        self.last_bpm = None
+
+    def update(self, valid_freqs_hz: np.ndarray, valid_power: np.ndarray) -> float:
+        """Scores peaks based on power and biological momentum."""
+        if len(valid_freqs_hz) == 0:
+            return self.last_bpm if self.last_bpm else 75.0
+
+        # If first frame, trust the absolute highest peak
+        if self.last_bpm is None:
+            best_idx = np.argmax(valid_power)
+            self.last_bpm = valid_freqs_hz[best_idx] * 60.0
+            return self.last_bpm
+
+        # Normalize the power spectrum so the highest peak is exactly 1.0
+        norm_power = valid_power / (np.max(valid_power) + 1e-8)
+        
+        # Calculate the Biological Penalty (Distance from previous BPM)
+        freq_bpm = valid_freqs_hz * 60.0
+        distance_penalty = np.abs(freq_bpm - self.last_bpm) / self.max_jump
+        
+        # Score = Power - (Penalty * Weight)
+        scores = norm_power - (distance_penalty * 0.5) 
+        
+        # Select the biologically logical peak
+        best_idx = np.argmax(scores)
+        raw_bpm = valid_freqs_hz[best_idx] * 60.0
+        
+        # Apply an Exponential Moving Average (EMA) to smooth out micro-jitters
+        self.last_bpm = (0.7 * self.last_bpm) + (0.3 * raw_bpm)
+        
+        return self.last_bpm
+
+
 class SignalProcessor:
     def __init__(self, buffer_seconds: int = 30, target_fps: float = 30.0):
         self.target_fps = target_fps
@@ -80,6 +121,9 @@ class SignalProcessor:
         self.bpm_buffer = deque(maxlen=smoothing_frames) 
         self.last_valid_bpm = None
         
+        # Initialize the Biological Tracker
+        self.hr_tracker = BiologicalHRTracker()
+
         logging.info("SignalProcessor using to POS RGB Architecture.")
     
     def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict, timestamp: float) -> None:
@@ -230,9 +274,8 @@ class SignalProcessor:
         bpm_freqs = frequencies[bpm_indices]
         bpm_filt_mag = filtered_power[bpm_indices]
         
-        # 4. Argmax Peak Detection
-        peak_index = np.argmax(bpm_filt_mag)
-        raw_bpm = bpm_freqs[peak_index] * 60.0
+        # 4. UPGRADE: Biological Peak Tracking (Replaces Argmax)
+        raw_bpm = self.hr_tracker.update(bpm_freqs, bpm_filt_mag)
 
         return raw_bpm, bpm_freqs, bpm_filt_mag
     
