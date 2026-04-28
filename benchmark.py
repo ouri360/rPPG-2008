@@ -71,7 +71,7 @@ def main():
     # --- CONFIGURATION ---
     VIDEO_SOURCE = "dataset/UBFC-Phys-S2/vid_s2_T2.avi"       # Point this to your UBFC video
     GT_FILE = "dataset/UBFC-Phys-S2/bvp_s2_T2.csv"    # Point this to your UBFC ground truth
-    OUTPUT_CSV = "dataset/results/benchmark_results_s2_T2_POS_DeepLearning_10.csv"
+    OUTPUT_CSV = "dataset/results/benchmark_results_s2_T2_POS_DeepLearning_10+.csv"
     WARMUP_SECONDS = 35.0                  # Ignore the first 35 seconds
     # ---------------------
 
@@ -136,4 +136,5 @@ def main():
         print("\nBenchmark failed: Not enough data collected. Ensure the video is longer than 35 seconds.")
 
 if __name__ == "__main__":
+    """Entry point for the rPPG benchmarking script. Runs the main loop that processes the video, collects BPM estimates and ground truth, and calculates evaluation metrics."""
     main()

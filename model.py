@@ -12,8 +12,10 @@ from torch import Tensor
 
 
 class POSNet(nn.Module):
+    """POSNet: A lightweight 1D CNN for rPPG signal fusion and alpha estimation. Designed to replace the mathematical alpha-tuning step in the POS algorithm with a learnable model that can adapt to different subjects and conditions."""
     # Added the return_telemetry flag
     def __init__(self, num_rois: int = 9, return_telemetry: bool = False) -> None:
+        """Initializes the POSNet model architecture, including the spatial attention mechanism and alpha estimator. The return_telemetry flag allows the model to output intermediate values for AI-driven dashboard visualization."""
         super().__init__()
         self.return_telemetry = return_telemetry
         
@@ -38,6 +40,7 @@ class POSNet(nn.Module):
         )
 
     def forward(self, x: Tensor):
+        """Forward pass through the POSNet model. Takes a tensor of shape (B, 2, SeqLen, ROIs) and outputs the fused pulse signal. If return_telemetry is True, also returns the attention weights and alpha values for dashboard visualization."""
         B, C, L, R = x.shape
         
         std_features = torch.std(x, dim=2).view(B, -1) 

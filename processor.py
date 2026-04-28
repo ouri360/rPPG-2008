@@ -29,13 +29,16 @@ HIGHCUT_HZ = 3.0
 ORDER = 3               
 NFFT = 8192             
 
-# --- PASTE YOUR BIOLOGICAL HR TRACKER HERE ---
+
 class BiologicalHRTracker:
+    """A simple tracker to stabilize heart rate estimates over time, preventing unrealistic jumps."""
     def __init__(self, max_jump: float = 15.0):
+        """Initializes the tracker with a maximum allowed jump in BPM between consecutive estimates."""
         self.max_jump = max_jump 
         self.last_bpm = None
 
     def update(self, valid_freqs_hz: np.ndarray, valid_power: np.ndarray) -> float:
+        """Takes the valid frequencies and their corresponding power magnitudes, applies a stability penalty, and returns a smoothed BPM estimate."""
         if len(valid_freqs_hz) == 0:
             return self.last_bpm if self.last_bpm else 75.0
         if self.last_bpm is None:
@@ -52,7 +55,9 @@ class BiologicalHRTracker:
         return self.last_bpm
 
 class SignalProcessor:
+    """SignalProcessor for rPPG Extraction and POSNet Inference"""
     def __init__(self, buffer_seconds: int = 30, target_fps: float = 30.0):
+        """Initializes the SignalProcessor with buffering capabilities and sets up the POSNet model for inference."""
         self.target_fps = target_fps
         self.buffer_seconds = buffer_seconds
         self.max_length = int(buffer_seconds * target_fps)
@@ -137,6 +142,7 @@ class SignalProcessor:
         self.hr_tracker = BiologicalHRTracker()
 
     def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict, timestamp: float) -> None:
+        """Extracts the mean RGB values from each ROI, buffers them, and prepares the data for POS processing."""
         global_g = [] 
         for region_name in self.roi_keys:
             color_bgr = rois.get(region_name)
@@ -161,6 +167,7 @@ class SignalProcessor:
         return np.array(self.raw_g), np.array(self.timestamps)
     
     def get_filtered_signal(self) -> Optional[np.ndarray]:
+        """Processes the buffered raw signal using the POS algorithm and returns the filtered rPPG signal ready for heart rate estimation."""
         if len(self.timestamps) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None
 
@@ -253,6 +260,7 @@ class SignalProcessor:
         return filtered_signal
     
     def estimate_heart_rate(self) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
+        """Returns the estimated BPM along with the frequencies and their magnitudes for telemetry purposes."""
         if len(self.raw_g) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None, None, None
         filtered_signal = self.get_filtered_signal()
@@ -285,9 +293,11 @@ class SignalProcessor:
         return 1.0 / mean_diff
     
     def get_latest_weights(self) -> dict:
+        """Returns the latest AI spatial attention weights for each ROI, which can be used to color-code the face mesh in the dashboard."""
         return self.latest_ai_weights
         
     def get_alpha_telemetry(self) -> Tuple[float, float]:
+        """Returns both the mathematical alpha and the AI-predicted alpha for telemetry display."""
         ai_alpha = self.latest_ai_alpha
         math_alpha = 1.0
         
@@ -311,4 +321,5 @@ class SignalProcessor:
         return math_alpha, ai_alpha
     
     def get_backend_name(self) -> str:
+        """Returns the name of the active hardware backend (e.g., 'TensorRT', 'ONNX (CUDA)', 'PyTorch (CPU)') for display on the dashboard."""
         return self.current_backend

@@ -33,6 +33,7 @@ class PhaseInvariantPearsonLoss(nn.Module):
         self.max_shift = max_shift
 
     def forward(self, preds: Tensor, targets: Tensor) -> Tensor:
+        """Calculates the loss by finding the best possible Pearson correlation between the predicted and target signals, allowing for a time shift to account for physiological delays."""
         # best_pearson starts at -1.0 (worst possible correlation)
         best_pearson = -1.0 * torch.ones(preds.size(0), device=preds.device)
         

@@ -16,6 +16,7 @@ from processor import SignalProcessor
 from gt import GroundTruthReader
 
 def main():
+    """Main loop for real-time rPPG extraction and dashboard display. Captures video frames, applies face detection and POSNet inference, and updates the OpenCV dashboard with telemetry and ECG waveform."""
     detector = FaceDetector()
 
     VIDEO_SOURCE = "dataset/UBFC-rPPG-Set2-Realistic/vid_subject4.avi"
@@ -156,4 +157,5 @@ def main():
                 break
 
 if __name__ == "__main__":
+    """Entry point for the rPPG application. Initializes the main loop that captures video frames, processes them, and updates the dashboard."""
     main()

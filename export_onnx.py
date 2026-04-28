@@ -7,6 +7,7 @@ import os
 from model import POSNet
 
 def export_to_tensorrt_onnx():
+    """Exports the trained POSNet model to ONNX format, including telemetry outputs for TensorRT optimization. The exported model will have three outputs: the fused pulse signal, the attention weights, and the alpha values, allowing for advanced dashboard visualization in real-time applications."""
     print("Loading PyTorch model weights...")
     # Initialize model with telemetry enabled
     model = POSNet(num_rois=9, return_telemetry=True)
@@ -41,4 +42,5 @@ def export_to_tensorrt_onnx():
     print("Success! 'pos_net.onnx' created.")
 
 if __name__ == "__main__":
+    """Entry point for the ONNX export script. Loads the trained POSNet model, prepares a dummy input, and exports the model to ONNX format with telemetry outputs for TensorRT optimization."""
     export_to_tensorrt_onnx()
