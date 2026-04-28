@@ -301,3 +301,37 @@ class SignalProcessor:
         
         # Map them back to the 9 region keys
         return {key: float(last_window_weights[i]) for i, key in enumerate(self.roi_keys)}
+    
+    def get_alpha_telemetry(self) -> Tuple[float, float]:
+        """Returns (Math_Alpha, AI_Alpha) for the UI dashboard."""
+        ai_alpha = 1.0
+        math_alpha = 1.0
+        
+        # 1. Get the AI's Alpha
+        if hasattr(self.pos_net, 'latest_alpha') and self.pos_net.latest_alpha is not None:
+            # Grab the alpha from the very last sliding window
+            ai_alpha = float(self.pos_net.latest_alpha[-1][0])
+            
+        # 2. Calculate the traditional Math Alpha
+        # Math Alpha = Standard Deviation of S1 / Standard Deviation of S2
+        if len(self.raw_g) > int(self.target_fps * 1.6):
+            try:
+                # Grab the most recent forehead colors to do a quick math check
+                r = np.array(list(self.rois_history['forehead_2']['r'])[-50:])
+                g = np.array(list(self.rois_history['forehead_2']['g'])[-50:])
+                b = np.array(list(self.rois_history['forehead_2']['b'])[-50:])
+                
+                # Normalize
+                rn = r / (np.mean(r) + 1e-8)
+                gn = g / (np.mean(g) + 1e-8)
+                bn = b / (np.mean(b) + 1e-8)
+                
+                s1 = gn - bn
+                s2 = -2.0 * rn + gn + bn
+                
+                # The classic 2016 POS equation
+                math_alpha = float(np.std(s1) / (np.std(s2) + 1e-8))
+            except Exception:
+                pass
+
+        return math_alpha, ai_alpha

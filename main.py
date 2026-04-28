@@ -106,6 +106,30 @@ def main():
             if gt_hr is not None:
                 cv2.putText(frame, f"True HR: {gt_hr:.1f}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
+            # --- THE POS ENGINE TELEMETRY HUD ---
+            math_alpha, ai_alpha = processor.get_alpha_telemetry()
+            
+            # Draw a dark, semi-transparent background box in the bottom left
+            h, w = frame.shape[:2]
+            box_y1, box_y2 = h - 90, h - 10
+            box_x1, box_x2 = 10, 235
+            
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (box_x1, box_y1), (box_x2, box_y2), (0, 0, 0), -1)
+            cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+            
+            # Draw the telemetry text
+            cv2.putText(frame, "POS ENGINE TELEMETRY", (box_x1 + 10, box_y1 + 22), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            
+            # Standard Math Alpha (Yellow)
+            cv2.putText(frame, f"Math Alpha : {math_alpha:.3f}", (box_x1 + 10, box_y1 + 47), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                        
+            # Deep Learning Alpha (Green)
+            cv2.putText(frame, f"AI Alpha   : {ai_alpha:.3f}", (box_x1 + 10, box_y1 + 72), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
             # ==================================================
             # 3. THROTTLED MATPLOTLIB DASHBOARD
             # Only draw the heavy GUI when we actually update the math (every 15 frames)

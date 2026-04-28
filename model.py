@@ -59,6 +59,10 @@ class POSNet(nn.Module):
         fused_signals = torch.sum(x * weights, dim=-1) 
         
         alpha = self.alpha_estimator(fused_signals) 
+        
+        # --- NEW: Save the AI's Alpha for the UI ---
+        self.latest_alpha = alpha.detach().cpu().numpy()
+
         alpha = alpha.unsqueeze(2) 
         
         s1 = fused_signals[:, 0:1, :] 
