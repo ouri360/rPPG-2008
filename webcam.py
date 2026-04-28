@@ -1,17 +1,17 @@
 """
-Webcam Streaming module with OpenCV library.
+Webcam Streaming module with OpenCV library (Multithreaded).
 ---------------------------------------
-This module provides a robust interface for capturing video frames from a USB webcam using OpenCV.
-It includes error handling for hardware issues and ensures proper resource management.
-It also attempts to lock camera parameters (exposure, white balance, focus) for consistent rPPG signal quality.
+Provides a robust, zero-blocking interface for capturing video frames.
+Automatically spawns a background I/O thread for live webcams to prevent 
+the USB controller from bottlenecking the Jetson Orin CPU.
 """
 
 import cv2
 import logging
+import threading
 from typing import Tuple, Optional, Union
 import numpy as np
 
-# Configure basic logging (Standard practice over using 'print')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class WebcamStream:
@@ -19,22 +19,14 @@ class WebcamStream:
     Interface for capturing video frames from a live webcam OR a video file.
     """
     def __init__(self, source: Union[int, str] = 0):
-        """
-        Initializes the video stream.
-        Args:
-            source: int (e.g., 0) for live webcam, or str (e.g., "video.mp4") for a file.
-        """
         self.source = source
+        self.is_live = isinstance(self.source, int)
         
-        # ==========================================
-        # DSP UPGRADE: Explicit V4L2 Backend
-        # Forces OpenCV to talk directly to the Linux Kernel, 
-        # bypassing GStreamer to allow hardware locking without admin rights.
-        # ==========================================
-        if isinstance(self.source, int):
+        # 1. Initialize Backend
+        if self.is_live:
             self.cap = cv2.VideoCapture(self.source, cv2.CAP_V4L2)
         else:
-            self.cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)  # Use FFMPEG for video files
+            self.cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG) 
         
         if not self.cap.isOpened():
             raise RuntimeError(f"Critical Error: Could not open video source: {self.source}.")
@@ -46,38 +38,71 @@ class WebcamStream:
 
         logging.info(f"Video source initialized successfully. Operating at {self.fps} FPS.")
 
-        # Attempt strict hardware locking natively via OpenCV V4L2
-        if isinstance(self.source, int):
-            logging.info("Live camera detected. Attempting to lock V4L2 hardware parameters via OpenCV...")
-            
-            # 1 = Manual Exposure, 3 = Auto Exposure
+        # 2. Hardware Locking
+        if self.is_live:
+            logging.info("Live camera detected. Locking V4L2 hardware parameters...")
             self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) 
-            self.cap.set(cv2.CAP_PROP_EXPOSURE, 100) # Adjust if image is too dark/bright
-            
-            # Disable Auto-White Balance
+            self.cap.set(cv2.CAP_PROP_EXPOSURE, 100) 
             self.cap.set(cv2.CAP_PROP_AUTO_WB, 0)
-            
-            # Disable Auto-Focus
             self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 0) 
             self.cap.set(cv2.CAP_PROP_FOCUS, 0) 
-            
-            # Disable Auto-Gain (if supported by your camera)
             self.cap.set(cv2.CAP_PROP_GAIN, 0)
-            
             self.cap.set(cv2.CAP_PROP_FPS, 30)
 
+        # 3. Multithreading Setup
+        self.ret = False
+        self.frame = None
+        self.stopped = False
+
+        if self.is_live:
+            # Read the very first frame to establish the connection before threading
+            self.ret, self.frame = self.cap.read()
+            
+            # Spawn the background I/O Thread
+            self.thread = threading.Thread(target=self._update, daemon=True)
+            self.thread.start()
+            logging.info("Background I/O Thread started! Main CPU loop is now unblocked.")
+        else:
+            logging.info("Video file detected. Using standard sequential reading for testing.")
+
+    def _update(self) -> None:
+        """
+        Runs continuously in the background thread (ONLY for live webcams).
+        Constantly pulls the USB bus and stores the absolute latest frame in RAM.
+        """
+        while not self.stopped:
+            ret, frame = self.cap.read()
+            if not ret:
+                self.stopped = True
+                break
+            
+            self.ret = ret
+            self.frame = frame
+
     def read_frame(self) -> Tuple[bool, Optional[np.ndarray]]:
-        ret, frame = self.cap.read()
-        if not ret:
-            # If playing a video file, ret=False means the video is finished.
-            logging.info("End of video stream reached or hardware failed.")
-            return False, None
-        return True, frame
+        """Returns the instantly available frame without waiting for hardware."""
+        if self.is_live:
+            # Return the cached frame instantly
+            if self.stopped and self.frame is None:
+                return False, None
+            
+            # Return a copy to prevent the background thread from overwriting it while main.py draws the UI
+            return self.ret, self.frame.copy() if self.frame is not None else None
+        else:
+            # Standard blocking read for exact frame-by-frame video processing
+            return self.cap.read()
 
     def release(self) -> None:
-        if self.cap.isOpened():
+        """Shuts down the thread and the camera."""
+        self.stopped = True
+        
+        if self.is_live and hasattr(self, 'thread'):
+            self.thread.join(timeout=1.0)
+            
+        if hasattr(self, 'cap') and self.cap.isOpened():
             self.cap.release()
-            logging.info("Video source released safely.")
+            
+        logging.info("Video source released safely.")
 
     def __enter__(self):
         return self
@@ -85,10 +110,7 @@ class WebcamStream:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
 
-
-# --- Testing Block ---
 if __name__ == "__main__":
-    # Test script of the module
     try:
         with WebcamStream(source=0) as cam:
             while True:
@@ -96,9 +118,8 @@ if __name__ == "__main__":
                 if not success:
                     break
                 
-                cv2.imshow("Webcam Test (Press 'q' to quit)", current_frame)
+                cv2.imshow("Multithreaded Webcam Test (Press 'q' to quit)", current_frame)
                 
-                # Break loop on 'q' key press
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
     except Exception as e:
