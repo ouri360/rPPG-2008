@@ -70,12 +70,12 @@ def calculate_metrics(df: pd.DataFrame, output_csv: str):
 
 def main():
     # --- CONFIGURATION ---
-    #VIDEO_SOURCE = "dataset/UBFC-rPPG-Set2-Realistic/vid_subject1.avi"       # Point this to your UBFC video
-    #GT_FILE = "dataset/UBFC-rPPG-Set2-Realistic/gt_subject1.txt"    # Point this to your UBFC ground truth
-    #OUTPUT_CSV = "dataset/results/benchmark_results_subject1_POS_DeepLearning_7.csv"
-    VIDEO_SOURCE = "dataset/UBFC-Phys-S2/vid_s2_T2.avi"       # Point this to your UBFC video
-    GT_FILE = "dataset/UBFC-Phys-S2/bvp_s2_T2.csv"    # Point this to your UBFC ground truth
-    OUTPUT_CSV = "dataset/results/benchmark_results_s2_T2_POS_DeepLearning_7.csv"
+    VIDEO_SOURCE = "dataset/UBFC-rPPG-Set2-Realistic/vid_subject3.avi"       # Point this to your UBFC video
+    GT_FILE = "dataset/UBFC-rPPG-Set2-Realistic/gt_subject3.txt"    # Point this to your UBFC ground truth
+    OUTPUT_CSV = "dataset/results/benchmark_results_subject3_POS_DeepLearning_8.csv"
+    #VIDEO_SOURCE = "dataset/UBFC-Phys-S1/vid_s1_T2.avi"       # Point this to your UBFC video
+    #GT_FILE = "dataset/UBFC-Phys-S1/bvp_s1_T2.csv"    # Point this to your UBFC ground truth
+    #OUTPUT_CSV = "dataset/results/benchmark_results_s1_T2_POS_DeepLearning_8.csv"
     WARMUP_SECONDS = 35.0                  # Ignore the first 35 seconds
     # ---------------------
 
