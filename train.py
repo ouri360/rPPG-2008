@@ -23,6 +23,10 @@ class PhaseInvariantPearsonLoss(nn.Module):
     """
     Computes the Negative Pearson Correlation Coefficient while allowing
     for a dynamic time-shift to compensate for hardware sensor delays.
+    
+    Why this is needed: Ground truth medical sensors (like finger/wrist pulse oximeters) 
+    record the blood volume pulse slightly later than a webcam looking at the face 
+    due to the physical time it takes blood to travel from the heart to the extremities.
     """
     def __init__(self, max_shift: int = 15) -> None:
         """

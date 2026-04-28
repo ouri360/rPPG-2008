@@ -31,9 +31,18 @@ NFFT = 8192
 
 
 class BiologicalHRTracker:
-    """A simple tracker to stabilize heart rate estimates over time, preventing unrealistic jumps."""
+    """
+    Biological Momentum Filter (Iteration 10+).
+    Replaces naive argmax peak detection with an Exponential Moving Average (EMA) 
+    and distance penalty system. This prevents mathematically impossible BPM spikes 
+    caused by sudden facial movements or illumination changes.
+    """
     def __init__(self, max_jump: float = 15.0):
-        """Initializes the tracker with a maximum allowed jump in BPM between consecutive estimates."""
+        """
+        Args:
+            max_jump: The maximum physiological BPM change allowed per second. 
+                      Limits the acceleration of the tracker to reject motion artifacts.
+        """
         self.max_jump = max_jump 
         self.last_bpm = None
 

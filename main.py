@@ -17,12 +17,20 @@ from gt import GroundTruthReader
 
 def main():
     """Main loop for real-time rPPG extraction and dashboard display. Captures video frames, applies face detection and POSNet inference, and updates the OpenCV dashboard with telemetry and ECG waveform."""
-    detector = FaceDetector()
-
-    VIDEO_SOURCE = "dataset/UBFC-rPPG-Set2-Realistic/vid_subject4.avi"
-    GT_FILE = "dataset/UBFC-rPPG-Set2-Realistic/gt_subject4.txt"
     
-    gt_reader = GroundTruthReader(GT_FILE)
+    # ==========================================
+    # USER CONFIGURATION (Change these for your setup)
+    # ==========================================
+    # Set VIDEO_SOURCE to 0 for live webcam, or a string path for a video file.
+    VIDEO_SOURCE = "dataset/UBFC-rPPG-Set2-Realistic/vid_subject4.avi" 
+    
+    # Set to None if you don't have ground truth data
+    GT_FILE = "dataset/UBFC-rPPG-Set2-Realistic/gt_subject4.txt" 
+    # ==========================================
+    
+    detector = FaceDetector()
+    gt_reader = GroundTruthReader(GT_FILE) if GT_FILE else None
+
     is_live = isinstance(VIDEO_SOURCE, int)
     
     # Caching Variables
@@ -100,7 +108,7 @@ def main():
             else:
                 cv2.putText(frame, "Calc BPM...", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
-            gt_hr = gt_reader.get_hr_at_time(timestamp)
+            gt_hr = gt_reader.get_hr_at_time(timestamp) if gt_reader else None
             if gt_hr is not None:
                 cv2.putText(frame, f"True HR: {gt_hr:.1f}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
