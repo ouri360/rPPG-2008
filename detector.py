@@ -63,7 +63,7 @@ class FaceDetector:
             return None
 
         # ==========================================
-        # 2. THE C++ COLOR EXTRACTION (Runs EVERY frame)
+        # 2. COLOR EXTRACTION (Runs EVERY frame)
         # ==========================================
         dynamic_rois = {}
 

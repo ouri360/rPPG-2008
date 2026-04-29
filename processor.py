@@ -138,7 +138,9 @@ class SignalProcessor:
             S2_all = []
             noises = {}
             
-            # 1. Extract POS Signals and Calculate Alpha/Noise for EACH sub-ROI
+            # ========================================================================
+            # PHASE 1: NOISE ESTIMATION
+            # ========================================================================
             for region_name in self.roi_keys:
                 C_window = C_rois[region_name][:, n:n+L] 
                 mean_c = np.mean(C_window, axis=1, keepdims=True)
@@ -150,24 +152,47 @@ class SignalProcessor:
                 S1_all.append(S1)
                 S2_all.append(S2)
                 
+                # Standard Deviation (std) mathematically measures "Spread".
+                # A clean, perfect heartbeat has a very low standard deviation.
+                # A cheek covered in moving shadows or talking lips will have a violently 
+                # high standard deviation because the pixels are rapidly changing color.
                 std_s1 = np.std(S1)
                 std_s2 = np.std(S2)
                 
-                # Math POS Alpha
+                # We calculate the POS Alpha for this specific sub-region.
                 alphas[region_name] = std_s1 / (std_s2 + 1e-8)
                 
-                # The "Noise" is the total variance of the region
+                # We define the total "Noise" of this region as the sum of its chaos.
                 noises[region_name] = std_s1 + std_s2
 
-            # 2. Math Attention (Inverse-Variance Weighting)
-            # High noise -> Small weight. Low noise -> Large weight.
+            # ========================================================================
+            # PHASE 2: INVERSE-VARIANCE WEIGHTING
+            # ========================================================================
+            
+            # THE LAW OF INVERSE VARIANCE: 
+            # If a region is highly noisy (e.g., Noise = 100), we want to ignore it. 
+            # If we invert it (1 / 100), the weight becomes 0.01 (Very small).
+            # If a region is perfectly clean (e.g., Noise = 2), we want to trust it.
+            # If we invert it (1 / 2), the weight becomes 0.50 (Very large).
+            # The + 1e-8 prevents a mathematical "Divide by Zero" crash if the video is completely black.
             inv_variance = {k: 1.0 / (v + 1e-8) for k, v in noises.items()}
             
-            # Normalize so all 9 weights sum exactly to 1.0 
+            # NORMALIZATION :
+            # Right now, our inverse weights are random raw decimals. 
+            # We need them to act like percentages that add up to exactly 100% (or 1.0).
             total_weight = sum(inv_variance.values())
+            
+            # By dividing each raw weight by the total pool of weights, we force them 
+            # into a perfect 0.0 to 1.0 distribution. 
+            # Example: Forehead might get 0.60 (60%), Left Cheek 0.35 (35%), Right Cheek in shadow 0.05 (5%).
             weights = {k: v / total_weight for k, v in inv_variance.items()}
 
-            # 3. Calculate Regional Alphas using the math weights
+            # ========================================================================
+            # PHASE 3: APPLY THE WEIGHTS (FUSION)
+            # ========================================================================
+            
+            # Now we calculate the 3 Regional Alphas. 
+            # If 'forehead_1' is clean and 'forehead_2' is noisy, 'forehead_1' dominates this equation.
             def get_weighted_reg_alpha(r1, r2, r3):
                 w_sum = weights[r1] + weights[r2] + weights[r3] + 1e-8
                 return (weights[r1]*alphas[r1] + weights[r2]*alphas[r2] + weights[r3]*alphas[r3]) / w_sum
@@ -176,10 +201,10 @@ class SignalProcessor:
             alpha_left = get_weighted_reg_alpha('left_cheek_1', 'left_cheek_2', 'left_cheek_3')
             alpha_right = get_weighted_reg_alpha('right_cheek_1', 'right_cheek_2', 'right_cheek_3')
             
-            # 4. Global Alpha is the fully weighted sum of all 9
+            # The Global Alpha is simply the sum of every individual Alpha multiplied by its trust percentage.
             global_alpha = sum(weights[k] * alphas[k] for k in self.roi_keys)
             
-            # --- Save to memory for the UI ---
+            # Save telemetry for the OpenCV visualizer
             self.latest_sub_alphas = alphas.copy()
             self.latest_regional_alphas = {
                 'forehead': alpha_forehead,
@@ -188,13 +213,13 @@ class SignalProcessor:
             }
             self.latest_global_alpha = global_alpha
             self.latest_math_weights = weights.copy()
-            # ---------------------------------
             
-            # 5. Fuse the signal using the mathematically derived Global Alpha
-            # AND multiply the actual waves by their dynamic weights!
+            # Finally, we physically shrink the noisy waves and boost the clean waves 
+            # before we do the final POS subtraction math.
             S1_weighted = np.sum([S1_all[i] * weights[self.roi_keys[i]] for i in range(9)], axis=0)
             S2_weighted = np.sum([S2_all[i] * weights[self.roi_keys[i]] for i in range(9)], axis=0)
             
+            # The final, mathematically purified heartbeat signal for this window (1.6 seconds)
             h = S1_weighted + (global_alpha * S2_weighted)
                 
             H[n:n+L] += (h - np.mean(h))
