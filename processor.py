@@ -1,9 +1,9 @@
 """
-SignalProcessor Module for rPPG Signal Extraction (POS Upgraded)
+SignalProcessor Module for rPPG Signal Extraction
 ---------------------------------------
 This module handles the extraction, filtering, and buffering of the raw rPPG signal.
-It utilizes the POS (Plane-Orthogonal-to-Skin) algorithm 
-to mathematically reduce ambient lighting flicker and motion artifacts.
+It utilizes a purely statistical, hierarchical POS algorithm to mathematically 
+reduce ambient lighting flicker and motion artifacts without Deep Learning.
 """
 
 import numpy as np
@@ -11,17 +11,6 @@ import logging
 from collections import deque
 from typing import Tuple, Optional
 from scipy.signal import butter, detrend, sosfiltfilt
-import os
-
-from model import POSNet
-import torch
-
-try:
-    import onnxruntime as ort
-    ORT_AVAILABLE = True
-except ImportError:
-    ORT_AVAILABLE = False
-    logging.warning("onnxruntime not installed. TensorRT hardware optimization disabled.")
 
 MINIMUM_AMOUNT_OF_DATA = 2 
 LOWCUT_HZ = 0.7         
@@ -31,23 +20,12 @@ NFFT = 8192
 
 
 class BiologicalHRTracker:
-    """
-    Biological Momentum Filter (Iteration 10+).
-    Replaces naive argmax peak detection with an Exponential Moving Average (EMA) 
-    and distance penalty system. This prevents mathematically impossible BPM spikes 
-    caused by sudden facial movements or illumination changes.
-    """
+    """A simple tracker to stabilize heart rate estimates over time, preventing unrealistic jumps."""
     def __init__(self, max_jump: float = 15.0):
-        """
-        Args:
-            max_jump: The maximum physiological BPM change allowed per second. 
-                      Limits the acceleration of the tracker to reject motion artifacts.
-        """
         self.max_jump = max_jump 
         self.last_bpm = None
 
     def update(self, valid_freqs_hz: np.ndarray, valid_power: np.ndarray) -> float:
-        """Takes the valid frequencies and their corresponding power magnitudes, applies a stability penalty, and returns a smoothed BPM estimate."""
         if len(valid_freqs_hz) == 0:
             return self.last_bpm if self.last_bpm else 75.0
         if self.last_bpm is None:
@@ -64,9 +42,7 @@ class BiologicalHRTracker:
         return self.last_bpm
 
 class SignalProcessor:
-    """SignalProcessor for rPPG Extraction and POSNet Inference"""
     def __init__(self, buffer_seconds: int = 30, target_fps: float = 30.0):
-        """Initializes the SignalProcessor with buffering capabilities and sets up the POSNet model for inference."""
         self.target_fps = target_fps
         self.buffer_seconds = buffer_seconds
         self.max_length = int(buffer_seconds * target_fps)
@@ -88,61 +64,11 @@ class SignalProcessor:
             for key in self.roi_keys
         }
 
-        # Telemetry State Trackers
-        self.latest_ai_weights = {k: 0.11 for k in self.roi_keys}
-        self.latest_ai_alpha = 1.0
-        self.use_onnx = False
-
-        # ==========================================
-        # THE HYBRID ENGINE (TensorRT -> PyTorch)
-        # ==========================================
-        onnx_path = 'pos_net.onnx'
-        pt_path = 'pos_net_weights.pt'
-
-        if ORT_AVAILABLE and os.path.exists(onnx_path):
-            logging.info(f"Found {onnx_path}! Initializing TensorRT Hardware Engine...")
-            os.makedirs('./trt_cache', exist_ok=True)
-            providers = [
-                ('TensorrtExecutionProvider', {
-                    'device_id': 0,
-                    'trt_fp16_enable': True,
-                    'trt_engine_cache_enable': True,
-                    'trt_engine_cache_path': './trt_cache',
-                    # THE FIX: Tell TensorRT the absolute limits of the dynamic axes!
-                    # Format: 'input_name:BatchxChannelsxSeqLenxROIs'
-                    'trt_profile_min_shapes': 'input:1x2x10x9',
-                    'trt_profile_opt_shapes': 'input:850x2x48x9',
-                    'trt_profile_max_shapes': 'input:3000x2x200x9'
-                }),
-                ('CUDAExecutionProvider', {'device_id': 0}),
-                'CPUExecutionProvider',
-            ]
-            self.ort_session = ort.InferenceSession(onnx_path, providers=providers)
-            self.ort_input_name = self.ort_session.get_inputs()[0].name
-            self.use_onnx = True
-        else:
-            logging.info("Loading PyTorch Engine (Fallback Mode)...")
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            self.pos_net = POSNet(num_rois=9).to(self.device).half()
-            if os.path.exists(pt_path):
-                self.pos_net.load_state_dict(torch.load(pt_path, map_location=self.device))
-            self.pos_net.eval()
-
-        # ==========================================
-        # Determine the Active Backend for the HUD
-        # ==========================================
-        self.current_backend = "Unknown"
-        if self.use_onnx:
-            # ONNXRuntime returns a list of active providers. The first is the primary engine.
-            active_provider = self.ort_session.get_providers()[0]
-            if "Tensorrt" in active_provider:
-                self.current_backend = "TensorRT"
-            elif "CUDA" in active_provider:
-                self.current_backend = "ONNX (CUDA)"
-            else:
-                self.current_backend = "ONNX (CPU)"
-        else:
-            self.current_backend = f"PyTorch ({self.device.type.upper()})"
+        # Mathematical State Trackers
+        self.latest_sub_alphas = {k: 1.0 for k in self.roi_keys}
+        self.latest_regional_alphas = {'forehead': 1.0, 'left_cheek': 1.0, 'right_cheek': 1.0}
+        self.latest_global_alpha = 1.0
+        self.current_backend = "NumPy (CPU)"
 
         logging.info(f"SignalProcessor running securely on: {self.current_backend}")
 
@@ -151,7 +77,6 @@ class SignalProcessor:
         self.hr_tracker = BiologicalHRTracker()
 
     def extract_and_buffer_multi(self, frame: np.ndarray, rois: dict, timestamp: float) -> None:
-        """Extracts the mean RGB values from each ROI, buffers them, and prepares the data for POS processing."""
         global_g = [] 
         for region_name in self.roi_keys:
             color_bgr = rois.get(region_name)
@@ -176,7 +101,6 @@ class SignalProcessor:
         return np.array(self.raw_g), np.array(self.timestamps)
     
     def get_filtered_signal(self) -> Optional[np.ndarray]:
-        """Processes the buffered raw signal using the POS algorithm and returns the filtered rPPG signal ready for heart rate estimation."""
         if len(self.timestamps) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None
 
@@ -206,12 +130,15 @@ class SignalProcessor:
         L = int(self.target_fps * 1.6) 
         H = np.zeros(N)
         
-        roi_keys = self.roi_keys
         num_windows = N - L + 1
-        batch_input = np.zeros((num_windows, 2, L, 9), dtype=np.float32)
 
         for n in range(num_windows):
-            for roi_idx, region_name in enumerate(roi_keys):
+            alphas = {}
+            S1_all = []
+            S2_all = []
+            
+            # 1. Extract POS Signals and Calculate Alpha for EACH of the 9 sub-ROIs
+            for region_name in self.roi_keys:
                 C_window = C_rois[region_name][:, n:n+L] 
                 mean_c = np.mean(C_window, axis=1, keepdims=True)
                 Cn = C_window / (mean_c + 1e-8)
@@ -219,44 +146,37 @@ class SignalProcessor:
                 S1 = Cn[1, :] - Cn[2, :]
                 S2 = -2.0 * Cn[0, :] + Cn[1, :] + Cn[2, :]
                 
-                batch_input[n, 0, :, roi_idx] = S1
-                batch_input[n, 1, :, roi_idx] = S2
+                S1_all.append(S1)
+                S2_all.append(S2)
                 
-        # ==========================================
-        # HYBRID INFERENCE EXECUTION
-        # ==========================================
-        if self.use_onnx:
-            # 1. TENSORRT INFERENCE (BLAZING FAST C++)
-            ort_inputs = {self.ort_input_name: batch_input}
-            pulse_out, weights_out, alpha_out = self.ort_session.run(None, ort_inputs)
-            
-            # Extract Telemetry from the final window
-            last_w = weights_out[-1]
-            last_a = alpha_out[-1][0]
-            
-            self.latest_ai_weights = {key: float(last_w[i]) for i, key in enumerate(self.roi_keys)}
-            self.latest_ai_alpha = float(last_a)
-            h_preds_numpy = pulse_out
-            
-        else:
-            # 2. PYTORCH INFERENCE
-            with torch.no_grad():
-                x_tensor = torch.from_numpy(batch_input)
-                model_device = next(self.pos_net.parameters()).device
-                x_tensor = x_tensor.to(model_device).half() 
-                
-                h_preds = self.pos_net(x_tensor) 
-                h_preds_numpy = h_preds.cpu().numpy()
-                
-            # Extract Telemetry
-            if hasattr(self.pos_net, 'latest_weights') and self.pos_net.latest_weights is not None:
-                last_w = self.pos_net.latest_weights[-1]
-                self.latest_ai_weights = {key: float(last_w[i]) for i, key in enumerate(self.roi_keys)}
-            if hasattr(self.pos_net, 'latest_alpha') and self.pos_net.latest_alpha is not None:
-                self.latest_ai_alpha = float(self.pos_net.latest_alpha[-1][0])
+                # Math POS Alpha: standard deviation of S1 / standard deviation of S2
+                alphas[region_name] = np.std(S1) / (np.std(S2) + 1e-8)
 
-        for n in range(num_windows):
-            h = h_preds_numpy[n]
+            # 2. Average the 3 sub-ROIs to get the 3 main regional Alphas
+            alpha_forehead = np.mean([alphas['forehead_1'], alphas['forehead_2'], alphas['forehead_3']])
+            alpha_left = np.mean([alphas['left_cheek_1'], alphas['left_cheek_2'], alphas['left_cheek_3']])
+            alpha_right = np.mean([alphas['right_cheek_1'], alphas['right_cheek_2'], alphas['right_cheek_3']])
+            
+            # 3. Average the 3 regional Alphas to get the Global Alpha
+            global_alpha = np.mean([alpha_forehead, alpha_left, alpha_right])
+
+            # --- Save to memory for the UI ---
+            self.latest_sub_alphas = alphas.copy()
+            self.latest_regional_alphas = {
+                'forehead': alpha_forehead,
+                'left_cheek': alpha_left,
+                'right_cheek': alpha_right
+            }
+            self.latest_global_alpha = global_alpha
+            # ---------------------------------------
+            
+            # 4. Fuse the signal using the mathematically derived Global Alpha
+            S1_mean = np.mean(S1_all, axis=0)
+            S2_mean = np.mean(S2_all, axis=0)
+            
+            h = S1_mean + (global_alpha * S2_mean)
+                
+            # Overlap-add
             H[n:n+L] += (h - np.mean(h))
             
         H_flat = H[L-1 : -(L-1)]
@@ -269,7 +189,6 @@ class SignalProcessor:
         return filtered_signal
     
     def estimate_heart_rate(self) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
-        """Returns the estimated BPM along with the frequencies and their magnitudes for telemetry purposes."""
         if len(self.raw_g) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None, None, None
         filtered_signal = self.get_filtered_signal()
@@ -302,33 +221,12 @@ class SignalProcessor:
         return 1.0 / mean_diff
     
     def get_latest_weights(self) -> dict:
-        """Returns the latest AI spatial attention weights for each ROI, which can be used to color-code the face mesh in the dashboard."""
-        return self.latest_ai_weights
+        # Since we no longer have AI attention weights, we give all 9 ROIs an equal 11.1% weighting for the visualizer.
+        return {k: 1.0 / len(self.roi_keys) for k in self.roi_keys}
         
-    def get_alpha_telemetry(self) -> Tuple[float, float]:
-        """Returns both the mathematical alpha and the AI-predicted alpha for telemetry display."""
-        ai_alpha = self.latest_ai_alpha
-        math_alpha = 1.0
-        
-        if len(self.raw_g) > int(self.target_fps * 1.6):
-            try:
-                r = np.array(list(self.rois_history['forehead_2']['r'])[-50:])
-                g = np.array(list(self.rois_history['forehead_2']['g'])[-50:])
-                b = np.array(list(self.rois_history['forehead_2']['b'])[-50:])
-                
-                rn = r / (np.mean(r) + 1e-8)
-                gn = g / (np.mean(g) + 1e-8)
-                bn = b / (np.mean(b) + 1e-8)
-                
-                s1 = gn - bn
-                s2 = -2.0 * rn + gn + bn
-                
-                math_alpha = float(np.std(s1) / (np.std(s2) + 1e-8))
-            except Exception:
-                pass
-
-        return math_alpha, ai_alpha
+    def get_alpha_telemetry(self):
+        """Returns all 13 mathematically derived Alphas for the UI."""
+        return self.latest_sub_alphas, self.latest_regional_alphas, self.latest_global_alpha
     
     def get_backend_name(self) -> str:
-        """Returns the name of the active hardware backend (e.g., 'TensorRT', 'ONNX (CUDA)', 'PyTorch (CPU)') for display on the dashboard."""
         return self.current_backend
