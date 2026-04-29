@@ -136,8 +136,9 @@ class SignalProcessor:
             alphas = {}
             S1_all = []
             S2_all = []
+            noises = {}
             
-            # 1. Extract POS Signals and Calculate Alpha for EACH of the 9 sub-ROIs
+            # 1. Extract POS Signals and Calculate Alpha/Noise for EACH sub-ROI
             for region_name in self.roi_keys:
                 C_window = C_rois[region_name][:, n:n+L] 
                 mean_c = np.mean(C_window, axis=1, keepdims=True)
@@ -149,17 +150,35 @@ class SignalProcessor:
                 S1_all.append(S1)
                 S2_all.append(S2)
                 
-                # Math POS Alpha: standard deviation of S1 / standard deviation of S2
-                alphas[region_name] = np.std(S1) / (np.std(S2) + 1e-8)
+                std_s1 = np.std(S1)
+                std_s2 = np.std(S2)
+                
+                # Math POS Alpha
+                alphas[region_name] = std_s1 / (std_s2 + 1e-8)
+                
+                # The "Noise" is the total variance of the region
+                noises[region_name] = std_s1 + std_s2
 
-            # 2. Average the 3 sub-ROIs to get the 3 main regional Alphas
-            alpha_forehead = np.mean([alphas['forehead_1'], alphas['forehead_2'], alphas['forehead_3']])
-            alpha_left = np.mean([alphas['left_cheek_1'], alphas['left_cheek_2'], alphas['left_cheek_3']])
-            alpha_right = np.mean([alphas['right_cheek_1'], alphas['right_cheek_2'], alphas['right_cheek_3']])
+            # 2. Math Attention (Inverse-Variance Weighting)
+            # High noise -> Small weight. Low noise -> Large weight.
+            inv_variance = {k: 1.0 / (v + 1e-8) for k, v in noises.items()}
             
-            # 3. Average the 3 regional Alphas to get the Global Alpha
-            global_alpha = np.mean([alpha_forehead, alpha_left, alpha_right])
+            # Normalize so all 9 weights sum exactly to 1.0 
+            total_weight = sum(inv_variance.values())
+            weights = {k: v / total_weight for k, v in inv_variance.items()}
 
+            # 3. Calculate Regional Alphas using the math weights
+            def get_weighted_reg_alpha(r1, r2, r3):
+                w_sum = weights[r1] + weights[r2] + weights[r3] + 1e-8
+                return (weights[r1]*alphas[r1] + weights[r2]*alphas[r2] + weights[r3]*alphas[r3]) / w_sum
+
+            alpha_forehead = get_weighted_reg_alpha('forehead_1', 'forehead_2', 'forehead_3')
+            alpha_left = get_weighted_reg_alpha('left_cheek_1', 'left_cheek_2', 'left_cheek_3')
+            alpha_right = get_weighted_reg_alpha('right_cheek_1', 'right_cheek_2', 'right_cheek_3')
+            
+            # 4. Global Alpha is the fully weighted sum of all 9
+            global_alpha = sum(weights[k] * alphas[k] for k in self.roi_keys)
+            
             # --- Save to memory for the UI ---
             self.latest_sub_alphas = alphas.copy()
             self.latest_regional_alphas = {
@@ -168,15 +187,16 @@ class SignalProcessor:
                 'right_cheek': alpha_right
             }
             self.latest_global_alpha = global_alpha
-            # ---------------------------------------
+            self.latest_math_weights = weights.copy()
+            # ---------------------------------
             
-            # 4. Fuse the signal using the mathematically derived Global Alpha
-            S1_mean = np.mean(S1_all, axis=0)
-            S2_mean = np.mean(S2_all, axis=0)
+            # 5. Fuse the signal using the mathematically derived Global Alpha
+            # AND multiply the actual waves by their dynamic weights!
+            S1_weighted = np.sum([S1_all[i] * weights[self.roi_keys[i]] for i in range(9)], axis=0)
+            S2_weighted = np.sum([S2_all[i] * weights[self.roi_keys[i]] for i in range(9)], axis=0)
             
-            h = S1_mean + (global_alpha * S2_mean)
+            h = S1_weighted + (global_alpha * S2_weighted)
                 
-            # Overlap-add
             H[n:n+L] += (h - np.mean(h))
             
         H_flat = H[L-1 : -(L-1)]
@@ -221,7 +241,9 @@ class SignalProcessor:
         return 1.0 / mean_diff
     
     def get_latest_weights(self) -> dict:
-        # Since we no longer have AI attention weights, we give all 9 ROIs an equal 11.1% weighting for the visualizer.
+        """Returns the mathematical Inverse-Variance weights for the UI."""
+        if hasattr(self, 'latest_math_weights'):
+            return self.latest_math_weights
         return {k: 1.0 / len(self.roi_keys) for k in self.roi_keys}
         
     def get_alpha_telemetry(self):

@@ -58,12 +58,12 @@ def main():
                     last_filt_mag = filt_mag
 
             # ==================================================
-            # 3. PURE OPENCV ZERO-LATENCY DASHBOARD
+            # 3. OPENCV DASHBOARD (No latency)
             # ==================================================
             h, w = frame.shape[:2]
             
-            # --- Expanded Telemetry Box for the Math Grid ---
-            box_y1, box_y2 = h - 170, h - 10
+            # --- Sleeker, Adjusted Telemetry Box ---
+            box_y1, box_y2 = h - 135, h - 10  # Shrunk the height to remove the title
             box_x1, box_x2 = 10, 420
             
             ecg_w, ecg_h = 400, 100
@@ -98,29 +98,27 @@ def main():
                 if gt_hr is not None:
                     cv2.putText(frame, f"True HR: {gt_hr:.1f}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-            # --- B. Hierarchical Math Telemetry Grid ---
+            # --- B. Hierarchical Math Telemetry Grid (Shifted Up) ---
             sub_a, reg_a, global_a = processor.get_alpha_telemetry()
-            
-            cv2.putText(frame, "HIERARCHICAL POS MATH", (box_x1 + 10, box_y1 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             
             # Forehead Row
             fh_str = f"FH : [{sub_a['forehead_1']:.2f}, {sub_a['forehead_2']:.2f}, {sub_a['forehead_3']:.2f}] -> {reg_a['forehead']:.2f}"
-            cv2.putText(frame, fh_str, (box_x1 + 10, box_y1 + 55), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+            cv2.putText(frame, fh_str, (box_x1 + 10, box_y1 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
             
             # Left Cheek Row
             lc_str = f"LC : [{sub_a['left_cheek_1']:.2f}, {sub_a['left_cheek_2']:.2f}, {sub_a['left_cheek_3']:.2f}] -> {reg_a['left_cheek']:.2f}"
-            cv2.putText(frame, lc_str, (box_x1 + 10, box_y1 + 75), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+            cv2.putText(frame, lc_str, (box_x1 + 10, box_y1 + 45), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
             
             # Right Cheek Row
             rc_str = f"RC : [{sub_a['right_cheek_1']:.2f}, {sub_a['right_cheek_2']:.2f}, {sub_a['right_cheek_3']:.2f}] -> {reg_a['right_cheek']:.2f}"
-            cv2.putText(frame, rc_str, (box_x1 + 10, box_y1 + 95), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+            cv2.putText(frame, rc_str, (box_x1 + 10, box_y1 + 65), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
             
             # Global Alpha
-            cv2.putText(frame, f"GLOBAL ALPHA : {global_a:.3f}", (box_x1 + 10, box_y1 + 125), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
+            cv2.putText(frame, f"GLOBAL ALPHA : {global_a:.3f}", (box_x1 + 10, box_y1 + 95), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
 
             # Backend
             backend_name = processor.get_backend_name()
-            cv2.putText(frame, f"[{backend_name}]", (box_x1 + 10, box_y1 + 150), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 100, 100), 1)
+            cv2.putText(frame, f"[{backend_name}]", (box_x1 + 10, box_y1 + 115), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 100, 100), 1)
 
             # --- C. The ECG Waveform ---
             filtered_signal = processor.get_filtered_signal()
@@ -149,7 +147,7 @@ def main():
                 cv2.rectangle(frame, (bar_x1, bar_y1), (bar_x2, bar_y2), (255, 255, 255), 1)
                 cv2.putText(frame, "SNR", (bar_x1 - 5, bar_y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
 
-            cv2.imshow("Pure Math rPPG Dashboard", frame)
+            cv2.imshow("Math rPPG Dashboard", frame)
 
             delay = int(1000 / cam.fps) if isinstance(VIDEO_SOURCE, str) else 1
             if cv2.waitKey(delay) & 0xFF == ord('q'):
