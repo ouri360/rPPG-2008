@@ -21,6 +21,7 @@ logging.getLogger().setLevel(logging.WARNING)
 
 def calculate_metrics(df: pd.DataFrame, output_csv: str):
     """Calculates academic metrics for rPPG evaluation and appends to CSV."""
+
     if len(df) == 0:
         print("No data collected. Video might be too short.")
         return
@@ -68,6 +69,8 @@ def calculate_metrics(df: pd.DataFrame, output_csv: str):
 
 
 def main():
+    """Main function to run the rPPG benchmark on a specified video and ground truth."""
+    
     # --- CONFIGURATION ---
     VIDEO_SOURCE = "dataset/UBFC-Phys-S1/vid_s1_T2.avi"       # Point this to your UBFC video
     GT_FILE = "dataset/UBFC-Phys-S1/bvp_s1_T2.csv"    # Point this to your UBFC ground truth
@@ -136,5 +139,8 @@ def main():
         print("\nBenchmark failed: Not enough data collected. Ensure the video is longer than 35 seconds.")
 
 if __name__ == "__main__":
-    """Entry point for the rPPG benchmarking script. Runs the main loop that processes the video, collects BPM estimates and ground truth, and calculates evaluation metrics."""
+    """
+    Entry point for the rPPG benchmarking script. Runs the main loop that processes the video, 
+    collects BPM estimates and ground truth, and calculates evaluation metrics.
+    """
     main()

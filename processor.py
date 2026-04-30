@@ -12,6 +12,7 @@ from collections import deque
 from typing import Tuple, Optional
 from scipy.signal import butter, detrend, sosfiltfilt
 
+
 MINIMUM_AMOUNT_OF_DATA = 2 
 LOWCUT_HZ = 0.7         
 HIGHCUT_HZ = 3.0        

@@ -12,8 +12,13 @@ import numpy as np
 import mediapipe as mp
 from typing import Optional
 
+
 class FaceDetector:
+    """Detects facial regions using MediaPipe Face Mesh and extracts mean RGB values."""
+
     def __init__(self, decimation_rate: int = 3):
+        """Initializes the FaceDetector with MediaPipe and sets up decimation."""
+
         self.mp_face_mesh = mp.solutions.face_mesh
         self.face_mesh = self.mp_face_mesh.FaceMesh(
             max_num_faces=1,
@@ -36,6 +41,8 @@ class FaceDetector:
         logging.info(f"FaceDetector initialized. Decimation Rate: 1/{self.decimation_rate} frames.")
 
     def get_face_mesh_rois(self, frame: np.ndarray, draw: bool = False, ai_weights: dict = None) -> Optional[dict]:
+        """Detects facial regions and extracts mean RGB values. Uses decimation to reduce CPU load."""
+
         h, w = frame.shape[:2]
         self.frame_count += 1
         

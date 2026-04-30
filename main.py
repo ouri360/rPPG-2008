@@ -15,7 +15,10 @@ from detector import FaceDetector
 from processor import SignalProcessor
 from gt import GroundTruthReader
 
+
 def main():
+    """Main function to run the rPPG benchmark on a specified video and ground truth."""
+
     # ==========================================
     # USER CONFIGURATION
     # ==========================================
@@ -157,5 +160,10 @@ def main():
                 logging.info("User requested shutdown.")
                 break
 
+
 if __name__ == "__main__":
+    """
+    Entry point for the rPPG benchmarking script. Runs the main loop that processes the video,
+    collects BPM estimates and ground truth, and calculates evaluation metrics.
+    """
     main()
