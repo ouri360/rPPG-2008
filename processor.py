@@ -67,6 +67,7 @@ class SignalProcessor:
         # Mathematical State Trackers
         self.latest_sub_alphas = {k: 1.0 for k in self.roi_keys}
         self.latest_regional_alphas = {'forehead': 1.0, 'left_cheek': 1.0, 'right_cheek': 1.0}
+        self.smoothed_weights = {k: 1.0 / len(self.roi_keys) for k in self.roi_keys}
         self.latest_global_alpha = 1.0
         self.current_backend = "NumPy (CPU)"
 
@@ -185,7 +186,15 @@ class SignalProcessor:
             # By dividing each raw weight by the total pool of weights, we force them 
             # into a perfect 0.0 to 1.0 distribution. 
             # Example: Forehead might get 0.60 (60%), Left Cheek 0.35 (35%), Right Cheek in shadow 0.05 (5%).
-            weights = {k: v / total_weight for k, v in inv_variance.items()}
+            raw_weights = {k: v / total_weight for k, v in inv_variance.items()}
+
+            # --- Apply Temporal Momentum (EMA) ---
+            # Blend 80% of the previous window's weight with 20% of the new raw weight
+            for k in self.roi_keys:
+                self.smoothed_weights[k] = (0.8 * self.smoothed_weights[k]) + (0.2 * raw_weights[k])
+            
+            # Use the smoothed weights for all the following Alpha and Fusion math!
+            weights = self.smoothed_weights 
 
             # ========================================================================
             # PHASE 3: APPLY THE WEIGHTS (FUSION)

@@ -19,8 +19,11 @@ def main():
     # ==========================================
     # USER CONFIGURATION
     # ==========================================
-    VIDEO_SOURCE = "dataset/UBFC-rPPG-Set2-Realistic/vid_subject4.avi"
-    GT_FILE = "dataset/UBFC-rPPG-Set2-Realistic/gt_subject4.txt"
+    #VIDEO_SOURCE = "dataset/UBFC-rPPG-Set2-Realistic/vid_subject4.avi"
+    #GT_FILE = "dataset/UBFC-rPPG-Set2-Realistic/gt_subject4.txt"
+
+    VIDEO_SOURCE = "dataset/UBFC-Phys-S1/vid_s1_T2.avi"       
+    GT_FILE = "dataset/UBFC-Phys-S1/bvp_s1_T2.csv"    
     # ==========================================
 
     detector = FaceDetector()
