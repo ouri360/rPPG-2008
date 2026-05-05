@@ -163,9 +163,16 @@ class SignalProcessor:
                 std_s2 = np.std(S2)
                 
                 # We calculate the POS Alpha for this specific sub-region.
+                # Alpha is purely a ratio of the two orthogonal projections (S1/S2).
+                # It tells us the specific mathematical angle needed to cancel out 
+                # specular reflection (lighting) for this specific biological patch of skin.
+                # A high Alpha (often seen on lips) just means the color profile is different, 
+                # requiring a steeper angle of projection. It does NOT mean the signal is clean.
                 alphas[region_name] = std_s1 / (std_s2 + 1e-8)
                 
                 # We define the total "Noise" of this region as the sum of its chaos.
+                # If a subject is talking, S1 and S2 will both fluctuate wildly, 
+                # resulting in massive total variance, even if their ratio (Alpha) remains stable.
                 noises[region_name] = std_s1 + std_s2
 
             # ========================================================================
@@ -237,7 +244,7 @@ class SignalProcessor:
             
             # The final, mathematically purified heartbeat signal for this window (1.6 seconds)
             h = S1_weighted + (global_alpha * S2_weighted)  
-                          
+
             H[n:n+L] += (h - np.mean(h))
             
         H_flat = H[L-1 : -(L-1)]
