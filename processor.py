@@ -55,7 +55,8 @@ class SignalProcessor:
         self.roi_keys = [
             'forehead_1', 'forehead_2', 'forehead_3',
             'left_cheek_1', 'left_cheek_2', 'left_cheek_3',
-            'right_cheek_1', 'right_cheek_2', 'right_cheek_3'
+            'right_cheek_1', 'right_cheek_2', 'right_cheek_3',
+            'lips'
         ]
 
         self.rois_history = {
@@ -66,9 +67,9 @@ class SignalProcessor:
         }
 
         # Mathematical State Trackers
-        self.latest_sub_alphas = {k: 1.0 for k in self.roi_keys}
-        self.latest_regional_alphas = {'forehead': 1.0, 'left_cheek': 1.0, 'right_cheek': 1.0}
         self.smoothed_weights = {k: 1.0 / len(self.roi_keys) for k in self.roi_keys}
+        self.latest_sub_alphas = {k: 1.0 for k in self.roi_keys}
+        self.latest_regional_alphas = {'forehead': 1.0, 'left_cheek': 1.0, 'right_cheek': 1.0, 'lips': 1.0}
         self.latest_global_alpha = 1.0
         self.current_backend = "NumPy (CPU)"
 
@@ -210,6 +211,9 @@ class SignalProcessor:
             alpha_forehead = get_weighted_reg_alpha('forehead_1', 'forehead_2', 'forehead_3')
             alpha_left = get_weighted_reg_alpha('left_cheek_1', 'left_cheek_2', 'left_cheek_3')
             alpha_right = get_weighted_reg_alpha('right_cheek_1', 'right_cheek_2', 'right_cheek_3')
+
+            # Since Lips is a single ROI, its Regional Alpha is exactly its Sub-Alpha!
+            alpha_lips = alphas['lips']
             
             # The Global Alpha is simply the sum of every individual Alpha multiplied by its trust percentage.
             global_alpha = sum(weights[k] * alphas[k] for k in self.roi_keys)
@@ -219,19 +223,21 @@ class SignalProcessor:
             self.latest_regional_alphas = {
                 'forehead': alpha_forehead,
                 'left_cheek': alpha_left,
-                'right_cheek': alpha_right
+                'right_cheek': alpha_right,
+                'lips': alpha_lips
             }
             self.latest_global_alpha = global_alpha
             self.latest_math_weights = weights.copy()
             
             # Finally, we physically shrink the noisy waves and boost the clean waves 
             # before we do the final POS subtraction math.
-            S1_weighted = np.sum([S1_all[i] * weights[self.roi_keys[i]] for i in range(9)], axis=0)
-            S2_weighted = np.sum([S2_all[i] * weights[self.roi_keys[i]] for i in range(9)], axis=0)
+            num_rois = len(self.roi_keys)
+            S1_weighted = np.sum([S1_all[i] * weights[self.roi_keys[i]] for i in range(num_rois)], axis=0)
+            S2_weighted = np.sum([S2_all[i] * weights[self.roi_keys[i]] for i in range(num_rois)], axis=0)
             
             # The final, mathematically purified heartbeat signal for this window (1.6 seconds)
-            h = S1_weighted + (global_alpha * S2_weighted)
-                
+            h = S1_weighted + (global_alpha * S2_weighted)  
+                          
             H[n:n+L] += (h - np.mean(h))
             
         H_flat = H[L-1 : -(L-1)]

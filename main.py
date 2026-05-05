@@ -64,13 +64,13 @@ def main():
                     last_filt_mag = filt_mag
 
             # ==================================================
-            # 3. OPENCV DASHBOARD (No latency)
+            # 3. PURE OPENCV ZERO-LATENCY DASHBOARD
             # ==================================================
             h, w = frame.shape[:2]
             
-            # --- Sleeker, Adjusted Telemetry Box ---
-            box_y1, box_y2 = h - 135, h - 10  # Shrunk the height to remove the title
-            box_x1, box_x2 = 10, 420
+            # --- Expanded Telemetry Box ---
+            box_y1, box_y2 = h - 155, h - 10  
+            box_x1, box_x2 = 10, 480 # Made slightly wider to fit the Weight percentages
             
             ecg_w, ecg_h = 400, 100
             ecg_x1, ecg_y1 = w - ecg_w - 10, h - ecg_h - 10
@@ -104,27 +104,37 @@ def main():
                 if gt_hr is not None:
                     cv2.putText(frame, f"True HR: {gt_hr:.1f}", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-            # --- B. Hierarchical Math Telemetry Grid (Shifted Up) ---
+            # --- B. Hierarchical Math Telemetry Grid (With Weights!) ---
             sub_a, reg_a, global_a = processor.get_alpha_telemetry()
             
+            # Calculate the total weight percentage for each region
+            w_fh = (current_weights['forehead_1'] + current_weights['forehead_2'] + current_weights['forehead_3']) * 100
+            w_lc = (current_weights['left_cheek_1'] + current_weights['left_cheek_2'] + current_weights['left_cheek_3']) * 100
+            w_rc = (current_weights['right_cheek_1'] + current_weights['right_cheek_2'] + current_weights['right_cheek_3']) * 100
+            w_lp = current_weights['lips'] * 100
+            
             # Forehead Row
-            fh_str = f"FH : [{sub_a['forehead_1']:.2f}, {sub_a['forehead_2']:.2f}, {sub_a['forehead_3']:.2f}] -> {reg_a['forehead']:.2f}"
+            fh_str = f"FH : [{sub_a['forehead_1']:.2f}, {sub_a['forehead_2']:.2f}, {sub_a['forehead_3']:.2f}] -> {reg_a['forehead']:.2f}  [W: {w_fh:.1f}%]"
             cv2.putText(frame, fh_str, (box_x1 + 10, box_y1 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
             
             # Left Cheek Row
-            lc_str = f"LC : [{sub_a['left_cheek_1']:.2f}, {sub_a['left_cheek_2']:.2f}, {sub_a['left_cheek_3']:.2f}] -> {reg_a['left_cheek']:.2f}"
+            lc_str = f"LC : [{sub_a['left_cheek_1']:.2f}, {sub_a['left_cheek_2']:.2f}, {sub_a['left_cheek_3']:.2f}] -> {reg_a['left_cheek']:.2f}  [W: {w_lc:.1f}%]"
             cv2.putText(frame, lc_str, (box_x1 + 10, box_y1 + 45), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
             
             # Right Cheek Row
-            rc_str = f"RC : [{sub_a['right_cheek_1']:.2f}, {sub_a['right_cheek_2']:.2f}, {sub_a['right_cheek_3']:.2f}] -> {reg_a['right_cheek']:.2f}"
+            rc_str = f"RC : [{sub_a['right_cheek_1']:.2f}, {sub_a['right_cheek_2']:.2f}, {sub_a['right_cheek_3']:.2f}] -> {reg_a['right_cheek']:.2f}  [W: {w_rc:.1f}%]"
             cv2.putText(frame, rc_str, (box_x1 + 10, box_y1 + 65), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+
+            # Lips Row
+            lips_str = f"LP : [{sub_a['lips']:.2f}] -> {reg_a['lips']:.2f}  [W: {w_lp:.1f}%]"
+            cv2.putText(frame, lips_str, (box_x1 + 10, box_y1 + 85), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
             
             # Global Alpha
-            cv2.putText(frame, f"GLOBAL ALPHA : {global_a:.3f}", (box_x1 + 10, box_y1 + 95), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
+            cv2.putText(frame, f"GLOBAL ALPHA : {global_a:.3f}", (box_x1 + 10, box_y1 + 110), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
 
             # Backend
             backend_name = processor.get_backend_name()
-            cv2.putText(frame, f"[{backend_name}]", (box_x1 + 10, box_y1 + 115), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 100, 100), 1)
+            cv2.putText(frame, f"[{backend_name}]", (box_x1 + 10, box_y1 + 125), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 100, 100), 1)
 
             # --- C. The ECG Waveform ---
             filtered_signal = processor.get_filtered_signal()
