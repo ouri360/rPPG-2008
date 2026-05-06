@@ -134,8 +134,9 @@ class SignalProcessor:
         H = np.zeros(N)
         
         num_windows = N - L + 1
+        step = 4
 
-        for n in range(num_windows):
+        for n in range(0, num_windows, step):            
             alphas = {}
             S1_all = []
             S2_all = []
@@ -256,10 +257,13 @@ class SignalProcessor:
         filtered_signal = sosfiltfilt(sos, H_detrended)
         return filtered_signal
     
-    def estimate_heart_rate(self) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
+    def estimate_heart_rate(self, filtered_signal: Optional[np.ndarray] = None) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
         if len(self.raw_g) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None, None, None
-        filtered_signal = self.get_filtered_signal()
+            
+        if filtered_signal is None:
+            filtered_signal = self.get_filtered_signal()
+            
         if filtered_signal is None:
             return None, None, None
             

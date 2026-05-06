@@ -54,6 +54,8 @@ class WebcamStream:
         self.frame = None
         self.stopped = False
 
+        self.new_frame_event = threading.Event()
+
         if self.is_live:
             # Read the very first frame to establish the connection before threading
             self.ret, self.frame = self.cap.read()
@@ -78,6 +80,7 @@ class WebcamStream:
             
             self.ret = ret
             self.frame = frame
+            self.new_frame_event.set()
 
     def read_frame(self) -> Tuple[bool, Optional[np.ndarray]]:
         """Returns the instantly available frame without waiting for hardware."""
@@ -86,6 +89,9 @@ class WebcamStream:
             if self.stopped and self.frame is None:
                 return False, None
             
+            self.new_frame_event.wait()
+            self.new_frame_event.clear()
+
             # Return a copy to prevent the background thread from overwriting it while main.py draws the UI
             return self.ret, self.frame.copy() if self.frame is not None else None
         else:

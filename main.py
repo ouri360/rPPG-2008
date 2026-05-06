@@ -35,6 +35,8 @@ def main():
     last_freqs = None
     last_filt_mag = None
     last_filtered_signal = None 
+    last_ecg_normalized = None 
+    last_snr = None
     is_calculating = False
     
     with WebcamStream(source=VIDEO_SOURCE) as cam:
@@ -50,7 +52,7 @@ def main():
             timestamp = time.time() if is_live else (frame_counter / cam.fps)
 
             # ==========================================
-            DISPLAY_RATE = 2 # Afficher 1 frame sur 2 (mets 3 si ça rame encore)
+            DISPLAY_RATE = 3 # Afficher 1 frame sur 3
             should_draw = (frame_counter % DISPLAY_RATE == 0)
 
             current_weights = processor.get_latest_weights()
@@ -64,26 +66,40 @@ def main():
 
             if frame_counter % 15 == 0 and not is_calculating:
                 def math_worker():
-                    nonlocal last_calculated_bpm, last_freqs, last_filt_mag, last_filtered_signal, is_calculating
-                    is_calculating = True # On verrouille
+                    # ATTENTION : Il faut bien ajouter last_ecg_normalized et last_snr ici !
+                    nonlocal last_calculated_bpm, last_freqs, last_filt_mag, last_filtered_signal, last_ecg_normalized, last_snr, is_calculating
+                    is_calculating = True 
                     
                     try:
-                        # On récupère le signal pour l'ECG
+                        # 1. On calcule le signal mathématique UNE SEULE FOIS
                         sig = processor.get_filtered_signal()
-                        if sig is not None:
+                        
+                        if sig is not None and len(sig) > 30:
                             last_filtered_signal = sig
                             
-                        # On estime le BPM
-                        bpm, freqs, filt_mag = processor.estimate_heart_rate()
-                        if bpm is not None:
-                            last_calculated_bpm = bpm
-                            last_freqs = freqs
-                            last_filt_mag = filt_mag
+                            # On normalise l'ECG pour qu'OpenCV puisse le dessiner
+                            display_pts = int(cam.fps * 3)
+                            wave_slice = sig[-display_pts:]
+                            min_val, max_val = np.min(wave_slice), np.max(wave_slice)
+                            last_ecg_normalized = (wave_slice - min_val) / (max_val - min_val + 1e-8)
+                            # ---------------------------------------
+                            
+                            # 2. On passe 'sig' directement pour économiser le CPU
+                            bpm, freqs, filt_mag = processor.estimate_heart_rate(filtered_signal=sig)
+                            
+                            if bpm is not None:
+                                last_calculated_bpm = bpm
+                                last_freqs = freqs
+                                last_filt_mag = filt_mag
+                                
+                                # --- LE CALCUL DU SNR ---
+                                last_snr = np.max(filt_mag) / (np.mean(filt_mag) + 1e-8)
+                                # -----------------------------------------
                     finally:
-                        is_calculating = False # On déverrouille à la fin
+                        is_calculating = False
 
                 # Lancer la fonction sans bloquer la vidéo
-                threading.Thread(target=math_worker, daemon=True).start()   
+                threading.Thread(target=math_worker, daemon=True).start()
 
             # ==================================================
             # 3. PURE OPENCV DASHBOARD (Exécuté seulement si should_draw est True)
@@ -153,21 +169,16 @@ def main():
                 cv2.putText(frame, f"[{backend_name}]", (box_x1 + 10, box_y1 + 125), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 100, 100), 1)
 
                 # --- C. The ECG Waveform ---
-                filtered_signal = last_filtered_signal
-                if filtered_signal is not None and len(filtered_signal) > 30:
-                    display_pts = int(cam.fps * 3)
-                    wave_slice = filtered_signal[-display_pts:]
-                    min_val, max_val = np.min(wave_slice), np.max(wave_slice)
-                    normalized_wave = (wave_slice - min_val) / (max_val - min_val + 1e-8)
-                    pts_y = ecg_y2 - (normalized_wave * ecg_h * 0.8) - (ecg_h * 0.1) 
+                if last_ecg_normalized is not None:
+                    # On utilise directement l'onde en cache
+                    pts_y = ecg_y2 - (last_ecg_normalized * ecg_h * 0.8) - (ecg_h * 0.1) 
                     pts_x = np.linspace(ecg_x1, ecg_x2, len(pts_y))
                     pts = np.vstack((pts_x, pts_y)).T.reshape((-1, 1, 2)).astype(np.int32)
                     cv2.polylines(frame, [pts], isClosed=False, color=(0, 255, 0), thickness=2)
 
                 # --- D. The SNR Confidence Bar ---
-                if last_filt_mag is not None:
-                    snr = np.max(last_filt_mag) / (np.mean(last_filt_mag) + 1e-8)
-                    fill_pct = np.clip((snr - 2.0) / 4.0, 0.0, 1.0)
+                if last_snr is not None:
+                    fill_pct = np.clip((last_snr - 2.0) / 4.0, 0.0, 1.0)
                     fill_h = int(fill_pct * (bar_y2 - bar_y1))
                     if fill_pct < 0.4:
                         bar_color = (0, 0, 255)
