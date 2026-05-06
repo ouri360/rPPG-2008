@@ -136,6 +136,8 @@ class SignalProcessor:
         num_windows = N - L + 1
         step = 4
 
+        local_smoothed_weights = {k: 1.0 / len(self.roi_keys) for k in self.roi_keys}
+
         for n in range(0, num_windows, step):            
             alphas = {}
             S1_all = []
@@ -201,10 +203,10 @@ class SignalProcessor:
             # --- Apply Temporal Momentum (EMA) ---
             # Blend 80% of the previous window's weight with 20% of the new raw weight
             for k in self.roi_keys:
-                self.smoothed_weights[k] = (0.8 * self.smoothed_weights[k]) + (0.2 * raw_weights[k])
+                local_smoothed_weights[k] = (0.8 * local_smoothed_weights[k]) + (0.2 * raw_weights[k])  
             
             # Use the smoothed weights for all the following Alpha and Fusion math!
-            weights = self.smoothed_weights 
+            weights = local_smoothed_weights
 
             # ========================================================================
             # PHASE 3: APPLY THE WEIGHTS (FUSION)
@@ -226,17 +228,6 @@ class SignalProcessor:
             # The Global Alpha is simply the sum of every individual Alpha multiplied by its trust percentage.
             global_alpha = sum(weights[k] * alphas[k] for k in self.roi_keys)
             
-            # Save telemetry for the OpenCV visualizer
-            self.latest_sub_alphas = alphas.copy()
-            self.latest_regional_alphas = {
-                'forehead': alpha_forehead,
-                'left_cheek': alpha_left,
-                'right_cheek': alpha_right,
-                'lips': alpha_lips
-            }
-            self.latest_global_alpha = global_alpha
-            self.latest_math_weights = weights.copy()
-            
             # Finally, we physically shrink the noisy waves and boost the clean waves 
             # before we do the final POS subtraction math.
             num_rois = len(self.roi_keys)
@@ -247,7 +238,21 @@ class SignalProcessor:
             h = S1_weighted + (global_alpha * S2_weighted)  
 
             H[n:n+L] += (h - np.mean(h))
-            
+
+        # ========================================================================
+        # MISE À JOUR DE L'INTERFACE 
+        # ========================================================================
+        # On expose les valeurs à OpenCV une seule fois, avec les données du "présent"
+        self.latest_sub_alphas = alphas.copy()
+        self.latest_regional_alphas = {
+            'forehead': alpha_forehead,
+            'left_cheek': alpha_left,
+            'right_cheek': alpha_right,
+            'lips': alpha_lips
+        }
+        self.latest_global_alpha = global_alpha
+        self.latest_math_weights = weights.copy()
+
         H_flat = H[L-1 : -(L-1)]
         if len(H_flat) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:
             return None

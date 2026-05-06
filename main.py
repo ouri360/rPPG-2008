@@ -41,7 +41,7 @@ def main():
     
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         frame_counter = 0
-        processor = SignalProcessor(buffer_seconds=30, target_fps=cam.fps)
+        processor = SignalProcessor(buffer_seconds=10, target_fps=cam.fps)
 
         while True:
             success, frame = cam.read_frame()
@@ -64,7 +64,7 @@ def main():
                 # L'extraction mathématique continue à chaque frame pour ne pas casser le signal
                 processor.extract_and_buffer_multi(frame, multi_rois, timestamp)
 
-            if frame_counter % 15 == 0 and not is_calculating:
+            if frame_counter % 10 == 0 and not is_calculating:
                 def math_worker():
                     # ATTENTION : Il faut bien ajouter last_ecg_normalized et last_snr ici !
                     nonlocal last_calculated_bpm, last_freqs, last_filt_mag, last_filtered_signal, last_ecg_normalized, last_snr, is_calculating
