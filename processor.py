@@ -37,19 +37,24 @@ class BiologicalHRTracker:
         
         norm_power = valid_power / (np.max(valid_power) + 1e-8)
         freq_bpm = valid_freqs_hz * 60.0
+        
+        # --- NOUVEAU : LE DÉTECTEUR DE VÉRITÉ ---
+        snr_peak = np.max(valid_power) / (np.mean(valid_power) + 1e-8)
+        
+        # Si le signal est extrêmement pur, on supprime la pénalité de distance 
+        # pour autoriser le BPM à fuir le piège des basses fréquences !
+        penalty_weight = 0.1 if snr_peak > 4.0 else 0.6
+        
         distance_penalty = np.abs(freq_bpm - self.last_bpm) / self.max_jump
-        scores = norm_power - (distance_penalty * 0.5) 
+        scores = norm_power - (distance_penalty * penalty_weight) 
 
         best_idx = np.argmax(scores)
 
-        # --- INTERPOLATION PARABOLIQUE (Précision Sub-Hz) ---
-        # Si le pic n'est pas sur les bords extérieurs
+        # --- INTERPOLATION PARABOLIQUE ---
         if 0 < best_idx < len(valid_freqs_hz) - 1:
             alpha = scores[best_idx - 1]
             beta = scores[best_idx]
             gamma = scores[best_idx + 1]
-            
-            # Calcul du décalage exact du sommet de la parabole
             shift = 0.5 * (alpha - gamma) / (alpha - 2 * beta + gamma + 1e-8)
             exact_freq = valid_freqs_hz[best_idx] + shift * (valid_freqs_hz[1] - valid_freqs_hz[0])
         else:
@@ -57,8 +62,12 @@ class BiologicalHRTracker:
             
         raw_bpm = exact_freq * 60.0
 
-        # Lissage plus fort (0.85 au lieu de 0.7) adapté au buffer court de 12s
-        self.last_bpm = (0.7 * self.last_bpm) + (0.3 * raw_bpm)
+        # Si la vérité est trouvée, on met à jour très vite. Sinon on lisse fortement.
+        if snr_peak > 4.0:
+            self.last_bpm = (0.3 * self.last_bpm) + (0.7 * raw_bpm)
+        else:
+            self.last_bpm = (0.85 * self.last_bpm) + (0.15 * raw_bpm)
+            
         return self.last_bpm
 
 class SignalProcessor:
@@ -251,17 +260,23 @@ class SignalProcessor:
         
         H_detrended = detrend(H_flat) 
         
-        # --- FILTRAGE DYNAMIQUE (ADAPTATIVE BANDPASS) ---
+        # --- VOIE 1 : (Pour la FFT) ---
+        # La FFT DOIT voir tout le spectre (0.7 à 3.0 Hz)
+        sos_math = butter(ORDER, [LOWCUT_HZ, HIGHCUT_HZ], btype='bandpass', fs=self.target_fps, output='sos')
+        signal_math = sosfiltfilt(sos_math, H_detrended)
+        
+        # --- VOIE 2 : (Pour le Dashboard ECG) ---
+        # On nettoie l'onde 
         if self.last_confident_hz is not None:
             low_bound = max(LOWCUT_HZ, self.last_confident_hz - 0.35)
             high_bound = min(HIGHCUT_HZ, self.last_confident_hz + 0.35)
+            sos_visuel = butter(ORDER, [low_bound, high_bound], btype='bandpass', fs=self.target_fps, output='sos')
+            signal_visuel = sosfiltfilt(sos_visuel, H_detrended)
         else:
-            low_bound, high_bound = LOWCUT_HZ, HIGHCUT_HZ
-            
-        sos = butter(ORDER, [low_bound, high_bound], btype='bandpass', fs=self.target_fps, output='sos')
-        filtered_signal = sosfiltfilt(sos, H_detrended)
+            signal_visuel = signal_math
         
-        return filtered_signal
+        # On renvoie les deux signaux 
+        return signal_math, signal_visuel
     
     def estimate_heart_rate(self, filtered_signal: Optional[np.ndarray] = None) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
         if len(self.raw_g) < self.target_fps * MINIMUM_AMOUNT_OF_DATA:

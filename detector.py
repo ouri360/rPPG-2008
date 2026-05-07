@@ -105,7 +105,7 @@ class FaceDetector:
             # Fusion transparente avec l'image de la webcam (40% opacité)
             frame_bg = cv2.bitwise_and(frame, frame, mask=cv2.bitwise_not(face_clip_mask))
             face_pixels = cv2.bitwise_and(frame, frame, mask=face_clip_mask)
-            overlay_blended = cv2.addWeighted(face_pixels, 0.4, overlay, 0.6, 0)
+            overlay_blended = cv2.addWeighted(face_pixels, 0.2, overlay, 0.8, 0)
             
             # Application finale sur l'image
             np.copyto(frame, cv2.add(frame_bg, overlay_blended))

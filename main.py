@@ -41,7 +41,7 @@ def main():
     
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         frame_counter = 0
-        processor = SignalProcessor(buffer_seconds=12, target_fps=cam.fps)
+        processor = SignalProcessor(buffer_seconds=15, target_fps=cam.fps)
 
         while True:
             success, frame = cam.read_frame()
@@ -71,30 +71,27 @@ def main():
                     is_calculating = True 
                     
                     try:
-                        # 1. On calcule le signal mathématique UNE SEULE FOIS
-                        sig = processor.get_filtered_signal()
+                        # On réceptionne les DEUX voies
+                        sig_math, sig_visuel = processor.get_filtered_signal()
                         
-                        if sig is not None and len(sig) > 30:
-                            last_filtered_signal = sig
+                        if sig_math is not None and len(sig_math) > 30:
+                            last_filtered_signal = sig_math
                             
-                            # On normalise l'ECG pour qu'OpenCV puisse le dessiner
+                            # --- L'INTERFACE reçoit le signal nettoyé ---
                             display_pts = int(cam.fps * 3)
-                            wave_slice = sig[-display_pts:]
+                            wave_slice = sig_visuel[-display_pts:] # <--- sig_visuel
                             min_val, max_val = np.min(wave_slice), np.max(wave_slice)
                             last_ecg_normalized = (wave_slice - min_val) / (max_val - min_val + 1e-8)
-                            # ---------------------------------------
                             
-                            # 2. On passe 'sig' directement pour économiser le CPU
-                            bpm, freqs, filt_mag = processor.estimate_heart_rate(filtered_signal=sig)
+                            # --- LA FFT reçoit la vérité ---
+                            bpm, freqs, filt_mag = processor.estimate_heart_rate(filtered_signal=sig_math) # <--- sig_math
                             
                             if bpm is not None:
                                 last_calculated_bpm = bpm
                                 last_freqs = freqs
                                 last_filt_mag = filt_mag
-                                
-                                # --- LE CALCUL DU SNR ---
                                 last_snr = np.max(filt_mag) / (np.mean(filt_mag) + 1e-8)
-                                # -----------------------------------------
+
                     finally:
                         is_calculating = False
 
@@ -163,7 +160,7 @@ def main():
                 rc_txt = f"JOUE D : {sub_a['right_cheek']:.2f} [W: {w_rc:.1f}%]"
                 cv2.putText(frame, rc_txt, (box_x1 + 10, y_offset + 50), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
                 
-                cv2.putText(frame, f"GLOBAL ALPHA : {global_a:.3f}", (box_x1 + 10, box_y2 - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
+                cv2.putText(frame, f"GLOBAL ALPHA : {global_a:.3f}", (box_x1 + 10, box_y2 - 42), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
 
                 backend_name = processor.get_backend_name()
                 cv2.putText(frame, f"[{backend_name}]", (box_x1 + 10, box_y1 + 125), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 100, 100), 1)
