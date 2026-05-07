@@ -38,11 +38,10 @@ class BiologicalHRTracker:
         norm_power = valid_power / (np.max(valid_power) + 1e-8)
         freq_bpm = valid_freqs_hz * 60.0
         
-        # --- NOUVEAU : LE DÉTECTEUR DE VÉRITÉ ---
         snr_peak = np.max(valid_power) / (np.mean(valid_power) + 1e-8)
         
-        # Si le signal est extrêmement pur, on supprime la pénalité de distance 
-        # pour autoriser le BPM à fuir le piège des basses fréquences !
+        # Si le signal est pur, on supprime la pénalité de distance 
+        # pour autoriser le BPM à fuir le piège des basses fréquences
         penalty_weight = 0.1 if snr_peak > 4.0 else 0.6
         
         distance_penalty = np.abs(freq_bpm - self.last_bpm) / self.max_jump
