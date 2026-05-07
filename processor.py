@@ -58,7 +58,7 @@ class BiologicalHRTracker:
         raw_bpm = exact_freq * 60.0
 
         # Lissage plus fort (0.85 au lieu de 0.7) adapté au buffer court de 12s
-        self.last_bpm = (0.85 * self.last_bpm) + (0.15 * raw_bpm)
+        self.last_bpm = (0.7 * self.last_bpm) + (0.3 * raw_bpm)
         return self.last_bpm
 
 class SignalProcessor:
@@ -152,6 +152,7 @@ class SignalProcessor:
         N = C_rois[self.roi_keys[0]].shape[1]
         L = int(self.target_fps * 1.6) 
         H = np.zeros(N)
+        H_counts = np.zeros(N)
         
         num_windows = N - L + 1
         step = 4
@@ -178,97 +179,69 @@ class SignalProcessor:
                 S1_all.append(S1)
                 S2_all.append(S2)
                 
-                # Standard Deviation (std) mathematically measures "Spread".
-                # A clean, perfect heartbeat has a very low standard deviation.
-                # A cheek covered in moving shadows or talking lips will have a violently 
-                # high standard deviation because the pixels are rapidly changing color.
                 std_s1 = np.std(S1)
                 std_s2 = np.std(S2)
                 
-                # We calculate the POS Alpha for this specific sub-region.
-                # Alpha is purely a ratio of the two orthogonal projections (S1/S2).
-                # It tells us the specific mathematical angle needed to cancel out 
-                # specular reflection (lighting) for this specific biological patch of skin.
-                # A high Alpha (often seen on lips) just means the color profile is different, 
-                # requiring a steeper angle of projection. It does NOT mean the signal is clean.
                 alphas[region_name] = std_s1 / (std_s2 + 1e-8)
-                
-                # We define the total "Noise" of this region as the sum of its chaos.
-                # If a subject is talking, S1 and S2 will both fluctuate wildly, 
-                # resulting in massive total variance, even if their ratio (Alpha) remains stable.
                 noises[region_name] = std_s1 + std_s2
 
             # ========================================================================
             # PHASE 2: INVERSE-VARIANCE WEIGHTING
             # ========================================================================
-            
-            # THE LAW OF INVERSE VARIANCE: 
-            # If a region is highly noisy (e.g., Noise = 100), we want to ignore it. 
-            # If we invert it (1 / 100), the weight becomes 0.01 (Very small).
-            # If a region is perfectly clean (e.g., Noise = 2), we want to trust it.
-            # If we invert it (1 / 2), the weight becomes 0.50 (Very large).
-            # The + 1e-8 prevents a mathematical "Divide by Zero" crash if the video is completely black.
             inv_variance = {k: 1.0 / (v + 1e-8) for k, v in noises.items()}
-            
-            # NORMALIZATION :
-            # Right now, our inverse weights are random raw decimals. 
-            # We need them to act like percentages that add up to exactly 100% (or 1.0).
             total_weight = sum(inv_variance.values())
-            
-            # By dividing each raw weight by the total pool of weights, we force them 
-            # into a perfect 0.0 to 1.0 distribution. 
-            # Example: Forehead might get 0.60 (60%), Left Cheek 0.35 (35%), Right Cheek in shadow 0.05 (5%).
             raw_weights = {k: v / total_weight for k, v in inv_variance.items()}
 
-            # --- Apply Temporal Momentum (EMA) ---
-            # Blend 80% of the previous window's weight with 20% of the new raw weight
             for k in self.roi_keys:
                 local_smoothed_weights[k] = (0.8 * local_smoothed_weights[k]) + (0.2 * raw_weights[k])  
             
-            # Use the smoothed weights for all the following Alpha and Fusion math!
             weights = local_smoothed_weights
 
             # ========================================================================
-            # PHASE 3: APPLY THE WEIGHTS (FUSION)
+            # PHASE 3: APPLY THE WEIGHTS (TRUE REGIONAL FUSION)
             # ========================================================================
-            
-            # Now we calculate the 3 Regional Alphas. 
-            # If 'forehead_1' is clean and 'forehead_2' is noisy, 'forehead_1' dominates this equation.
-            def get_weighted_reg_alpha(r1, r2, r3):
-                w_sum = weights[r1] + weights[r2] + weights[r3] + 1e-8
-                return (weights[r1]*alphas[r1] + weights[r2]*alphas[r2] + weights[r3]*alphas[r3]) / w_sum
+            h_final = np.zeros(L)
 
-            # Le front a toujours 3 sous-régions
-            alpha_forehead = get_weighted_reg_alpha('forehead_1', 'forehead_2', 'forehead_3')
-            
-            # Les joues sont d'un seul bloc, on prend leur Alpha directement
-            alpha_left = alphas['left_cheek']
-            alpha_right = alphas['right_cheek']
-            
-            # The Global Alpha is simply the sum of every individual Alpha multiplied by its trust percentage.
-            global_alpha = sum(weights[k] * alphas[k] for k in self.roi_keys)
-            
-            # Finally, we physically shrink the noisy waves and boost the clean waves 
-            # before we do the final POS subtraction math.
-            num_rois = len(self.roi_keys)
-            S1_weighted = np.sum([S1_all[i] * weights[self.roi_keys[i]] for i in range(num_rois)], axis=0)
-            S2_weighted = np.sum([S2_all[i] * weights[self.roi_keys[i]] for i in range(num_rois)], axis=0)
-            
-            # The final, mathematically purified heartbeat signal for this window (1.6 seconds)
-            h = S1_weighted + (global_alpha * S2_weighted)  
+            for i, region_name in enumerate(self.roi_keys):
+                w = weights[region_name]
+                a = alphas[region_name]
+                
+                # Onde POS pure pour cette zone spécifique
+                h_region = S1_all[i] + (a * S2_all[i])
+                
+                # Ajout pondéré au signal final
+                h_final += (w * h_region)
 
-            H[n:n+L] += (h - np.mean(h))
+            H[n:n+L] += (h_final - np.mean(h_final))
+            H_counts[n:n+L] += 1 
+
+        # ========================================================================
+        # CORRECTION DE L'AMPLITUDE (OVERLAP-ADD NORMALIZATION)
+        # ========================================================================
+        H_counts[H_counts == 0] = 1 
+        H = H / H_counts 
 
         # ========================================================================
         # MISE À JOUR DE L'INTERFACE 
         # ========================================================================
-        # On expose les valeurs à OpenCV une seule fois, avec les données du "présent"
+        # --- NOUVEAU : Recalcul des valeurs globales spécifiquement pour le Dashboard ---
+        def get_weighted_reg_alpha(r1, r2, r3):
+            w_sum = weights[r1] + weights[r2] + weights[r3] + 1e-8
+            return (weights[r1]*alphas[r1] + weights[r2]*alphas[r2] + weights[r3]*alphas[r3]) / w_sum
+
+        alpha_forehead = get_weighted_reg_alpha('forehead_1', 'forehead_2', 'forehead_3')
+        alpha_left = alphas['left_cheek']
+        alpha_right = alphas['right_cheek']
+        # -------------------------------------------------------------------------------
+
         self.latest_sub_alphas = alphas.copy()
         self.latest_regional_alphas = {
             'forehead': alpha_forehead,
             'left_cheek': alpha_left,
             'right_cheek': alpha_right
         }
+        
+        global_alpha = sum(weights[k] * alphas[k] for k in self.roi_keys)
         self.latest_global_alpha = global_alpha
         self.latest_math_weights = weights.copy()
 
@@ -277,9 +250,9 @@ class SignalProcessor:
             return None
         
         H_detrended = detrend(H_flat) 
+        
         # --- FILTRAGE DYNAMIQUE (ADAPTATIVE BANDPASS) ---
         if self.last_confident_hz is not None:
-            # On crée une fenêtre glissante serrée de ± 0.35 Hz (± 21 BPM) autour du cœur
             low_bound = max(LOWCUT_HZ, self.last_confident_hz - 0.35)
             high_bound = min(HIGHCUT_HZ, self.last_confident_hz + 0.35)
         else:
@@ -287,6 +260,7 @@ class SignalProcessor:
             
         sos = butter(ORDER, [low_bound, high_bound], btype='bandpass', fs=self.target_fps, output='sos')
         filtered_signal = sosfiltfilt(sos, H_detrended)
+        
         return filtered_signal
     
     def estimate_heart_rate(self, filtered_signal: Optional[np.ndarray] = None) -> Tuple[Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
@@ -318,8 +292,13 @@ class SignalProcessor:
         snr = peak_power / (mean_power + 1e-8)
 
         # On enregistre la fréquence (Hz) pour le prochain passage du filtre
-        if raw_bpm is not None and snr > 3.5:
-            self.last_confident_hz = raw_bpm / 60.0
+        if raw_bpm is not None:
+            if snr > 3.5:
+                # Signal clair : on verrouille le filtre autour de la valeur
+                self.last_confident_hz = raw_bpm / 60.0
+            elif snr < 2.0:
+                # Signal détruit (Mouvement brusque) : on CASSE le verrou !
+                self.last_confident_hz = None
             
         return raw_bpm, bpm_freqs, bpm_filt_mag
     

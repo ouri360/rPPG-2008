@@ -61,10 +61,6 @@ class FaceDetector:
                 master_mask = np.zeros((h, w), dtype=np.uint8)
                 cv2.fillPoly(master_mask, [hull], 255)
                 
-                # Érosion pour supprimer la lumière spéculaire
-                kernel = np.ones((5, 5), np.uint8)
-                master_mask = cv2.erode(master_mask, kernel, iterations=1)
-                
                 x, y, w_box, h_box = cv2.boundingRect(hull)
 
                 # Découpage du front
