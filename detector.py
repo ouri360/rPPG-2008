@@ -26,12 +26,11 @@ class FaceDetector:
         self.frame_count = 0
         self.cached_hulls = {}
         
-        # Added the continuous outer ring of the lips
+        # ROI INDICES for Forehead, Cheeks
         self.ROI_INDICES = {
             'forehead': [67, 10, 297, 299, 9, 69],
             'left_cheek': [117, 118, 101, 36, 205, 50],
-            'right_cheek': [346, 347, 330, 266, 425, 280],
-            'lips': [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185]
+            'right_cheek': [346, 347, 330, 266, 425, 280]
         }
         
         logging.info(f"FaceDetector initialized. Decimation Rate: 1/{self.decimation_rate} frames.")
@@ -43,21 +42,16 @@ class FaceDetector:
         if self.frame_count % self.decimation_rate == 1 or not self.cached_hulls:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = self.face_mesh.process(rgb_frame)
-
             if not results.multi_face_landmarks:
                 self.cached_hulls = {}
                 return None
-
             landmarks = results.multi_face_landmarks[0].landmark
             for region_name, indices in self.ROI_INDICES.items():
                 pts = np.array([(int(landmarks[i].x * w), int(landmarks[i].y * h)) for i in indices], dtype=np.int32)
                 self.cached_hulls[region_name] = cv2.convexHull(pts)
                 
-        if not self.cached_hulls:
-            return None
-
+        if not self.cached_hulls: return None
         dynamic_rois = {}
-
         if draw:
             overlay = np.zeros_like(frame)
             face_clip_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
@@ -66,70 +60,43 @@ class FaceDetector:
             master_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
             cv2.fillPoly(master_mask, [hull], 255)
             x, y, w_box, h_box = cv2.boundingRect(hull)
+            if draw: cv2.fillPoly(face_clip_mask, [hull], 255)
 
-            if draw:
-                cv2.fillPoly(face_clip_mask, [hull], 255)
-
-            # --- NEW: Handle the single Lips ROI ---
-            if region_name == 'lips':
-                sub_name = 'lips'
-                
-                if draw and ai_weights:
-                    weight = ai_weights.get(sub_name, 0.10)
-                    # Multiplier adjusted for 10 ROIs (Average weight is 0.10)
-                    intensity_val = np.clip(weight * 8.0 * 255, 0, 255).astype(np.uint8)
-                    color_sample = cv2.applyColorMap(np.array([[intensity_val]]), cv2.COLORMAP_INFERNO)
-                    bgr_color = tuple(map(int, color_sample[0, 0]))
-                else:
-                    bgr_color = (0, 0, 0)
-                
-                if draw:
-                    cv2.fillPoly(overlay, [hull], bgr_color)
-                
-                # Extract mean for the entire lip hull
-                mean_color = cv2.mean(frame, mask=master_mask)[:3]
-                dynamic_rois[sub_name] = mean_color
-
-            # --- Handle the Sliced Cheek/Forehead ROIs ---
-            else:
+            # --- Front : découpé en 3 ---
+            if region_name == 'forehead':
                 for i in range(3):
                     sub_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
-                    sub_name = f"{region_name}_{i+1}"
+                    sub_name = f"forehead_{i+1}"
+                    weight = ai_weights.get(sub_name, 0.20) if ai_weights else 0.20
                     
-                    if draw and ai_weights:
-                        weight = ai_weights.get(sub_name, 0.10)
-                        intensity_val = np.clip(weight * 8.0 * 255, 0, 255).astype(np.uint8)
-                        color_sample = cv2.applyColorMap(np.array([[intensity_val]]), cv2.COLORMAP_INFERNO)
-                        bgr_color = tuple(map(int, color_sample[0, 0]))
-                    else:
-                        bgr_color = (0, 0, 0)
+                    slice_w = w_box // 3
+                    x_start = x + (i * slice_w)
+                    x_end = x + w_box if i == 2 else x_start + slice_w
+                    cv2.rectangle(sub_mask, (x_start, y), (x_end, y + h_box), 255, -1)
                     
-                    if region_name == 'forehead':
-                        slice_w = w_box // 3
-                        x_start = x + (i * slice_w)
-                        x_end = x + w_box if i == 2 else x_start + slice_w
-                        cv2.rectangle(sub_mask, (x_start, y), (x_end, y + h_box), 255, -1)
-                        if draw:
-                            cv2.rectangle(overlay, (x_start, y), (x_end, y + h_box), bgr_color, cv2.FILLED)
-                    else:
-                        slice_h = h_box // 3
-                        y_start = y + (i * slice_h)
-                        y_end = y + h_box if i == 2 else y_start + slice_h
-                        cv2.rectangle(sub_mask, (x, y_start), (x + w_box, y_end), 255, -1)
-                        if draw:
-                            cv2.rectangle(overlay, (x, y_start), (x + w_box, y_end), bgr_color, cv2.FILLED)
+                    if draw:
+                        intensity = np.clip(weight * 5.0 * 255, 0, 255).astype(np.uint8)
+                        color = tuple(map(int, cv2.applyColorMap(np.array([[intensity]]), cv2.COLORMAP_INFERNO)[0,0]))
+                        cv2.rectangle(overlay, (x_start, y), (x_end, y + h_box), color, -1)
 
                     final_mask = cv2.bitwise_and(master_mask, sub_mask)
-                    mean_color = cv2.mean(frame, mask=final_mask)[:3]
-                    dynamic_rois[sub_name] = mean_color
+                    dynamic_rois[sub_name] = cv2.mean(frame, mask=final_mask)[:3]
+            
+            # --- Joues : Un seul bloc  ---
+            else:
+                weight = ai_weights.get(region_name, 0.20) if ai_weights else 0.20
+                if draw:
+                    intensity = np.clip(weight * 5.0 * 255, 0, 255).astype(np.uint8)
+                    color = tuple(map(int, cv2.applyColorMap(np.array([[intensity]]), cv2.COLORMAP_INFERNO)[0,0]))
+                    cv2.fillPoly(overlay, [hull], color)
+                
+                dynamic_rois[region_name] = cv2.mean(frame, mask=master_mask)[:3]
 
         if draw:
             overlay = cv2.bitwise_and(overlay, overlay, mask=face_clip_mask)
-            inv_mask = cv2.bitwise_not(face_clip_mask)
-            frame_bg = cv2.bitwise_and(frame, frame, mask=inv_mask)
+            frame_bg = cv2.bitwise_and(frame, frame, mask=cv2.bitwise_not(face_clip_mask))
             np.copyto(frame, cv2.add(frame_bg, overlay))
-
             for hull in self.cached_hulls.values():
-                cv2.polylines(frame, [hull], isClosed=True, color=(255, 255, 255), thickness=1)
+                cv2.polylines(frame, [hull], True, (255, 255, 255), 1)
 
         return dynamic_rois

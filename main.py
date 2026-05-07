@@ -131,7 +131,7 @@ def main():
                 # LAYER 2: 100% Opaque Text and Graphics
                 # --------------------------------------------------
                 fps = processor.get_current_fps()
-                cv2.putText(frame, f"FPS: {fps:.1f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(frame, f"FPS: {fps:.1f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
                 if last_calculated_bpm is not None:
                     cv2.putText(frame, f"Est BPM: {last_calculated_bpm:.1f}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
@@ -147,23 +147,23 @@ def main():
                 sub_a, reg_a, global_a = processor.get_alpha_telemetry()
                 
                 w_fh = (current_weights['forehead_1'] + current_weights['forehead_2'] + current_weights['forehead_3']) * 100
-                w_lc = (current_weights['left_cheek_1'] + current_weights['left_cheek_2'] + current_weights['left_cheek_3']) * 100
-                w_rc = (current_weights['right_cheek_1'] + current_weights['right_cheek_2'] + current_weights['right_cheek_3']) * 100
-                w_lp = current_weights['lips'] * 100
+                w_lc = (current_weights['left_cheek']) * 100
+                w_rc = (current_weights['right_cheek']) * 100
                 
-                fh_str = f"FH : [{sub_a['forehead_1']:.2f}, {sub_a['forehead_2']:.2f}, {sub_a['forehead_3']:.2f}] -> {reg_a['forehead']:.2f}  [W: {w_fh:.1f}%]"
-                cv2.putText(frame, fh_str, (box_x1 + 10, box_y1 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+                y_offset = box_y1 + 25
+                # Ligne Front
+                fh_txt = f"FRONT : [{sub_a['forehead_1']:.2f}, {sub_a['forehead_2']:.2f}, {sub_a['forehead_3']:.2f}] -> {reg_a['forehead']:.2f} [W: {w_fh:.1f}%]"
+                cv2.putText(frame, fh_txt, (box_x1 + 10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
                 
-                lc_str = f"LC : [{sub_a['left_cheek_1']:.2f}, {sub_a['left_cheek_2']:.2f}, {sub_a['left_cheek_3']:.2f}] -> {reg_a['left_cheek']:.2f}  [W: {w_lc:.1f}%]"
-                cv2.putText(frame, lc_str, (box_x1 + 10, box_y1 + 45), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+                # Ligne Joue Gauche
+                lc_txt = f"JOUE G : {sub_a['left_cheek']:.2f} [W: {w_lc:.1f}%]"
+                cv2.putText(frame, lc_txt, (box_x1 + 10, y_offset + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
                 
-                rc_str = f"RC : [{sub_a['right_cheek_1']:.2f}, {sub_a['right_cheek_2']:.2f}, {sub_a['right_cheek_3']:.2f}] -> {reg_a['right_cheek']:.2f}  [W: {w_rc:.1f}%]"
-                cv2.putText(frame, rc_str, (box_x1 + 10, box_y1 + 65), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
-
-                lips_str = f"LP : [{sub_a['lips']:.2f}] -> {reg_a['lips']:.2f}  [W: {w_lp:.1f}%]"
-                cv2.putText(frame, lips_str, (box_x1 + 10, box_y1 + 85), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
+                # Ligne Joue Droite
+                rc_txt = f"JOUE D : {sub_a['right_cheek']:.2f} [W: {w_rc:.1f}%]"
+                cv2.putText(frame, rc_txt, (box_x1 + 10, y_offset + 50), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
                 
-                cv2.putText(frame, f"GLOBAL ALPHA : {global_a:.3f}", (box_x1 + 10, box_y1 + 110), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
+                cv2.putText(frame, f"GLOBAL ALPHA : {global_a:.3f}", (box_x1 + 10, box_y2 - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
 
                 backend_name = processor.get_backend_name()
                 cv2.putText(frame, f"[{backend_name}]", (box_x1 + 10, box_y1 + 125), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 100, 100), 1)

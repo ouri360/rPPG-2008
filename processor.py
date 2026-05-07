@@ -54,9 +54,8 @@ class SignalProcessor:
         
         self.roi_keys = [
             'forehead_1', 'forehead_2', 'forehead_3',
-            'left_cheek_1', 'left_cheek_2', 'left_cheek_3',
-            'right_cheek_1', 'right_cheek_2', 'right_cheek_3',
-            'lips'
+            'left_cheek',
+            'right_cheek'
         ]
 
         self.rois_history = {
@@ -69,7 +68,7 @@ class SignalProcessor:
         # Mathematical State Trackers
         self.smoothed_weights = {k: 1.0 / len(self.roi_keys) for k in self.roi_keys}
         self.latest_sub_alphas = {k: 1.0 for k in self.roi_keys}
-        self.latest_regional_alphas = {'forehead': 1.0, 'left_cheek': 1.0, 'right_cheek': 1.0, 'lips': 1.0}
+        self.latest_regional_alphas = {'forehead': 1.0, 'left_cheek': 1.0, 'right_cheek': 1.0}
         self.latest_global_alpha = 1.0
         self.current_backend = "NumPy (CPU)"
 
@@ -218,12 +217,12 @@ class SignalProcessor:
                 w_sum = weights[r1] + weights[r2] + weights[r3] + 1e-8
                 return (weights[r1]*alphas[r1] + weights[r2]*alphas[r2] + weights[r3]*alphas[r3]) / w_sum
 
+            # Le front a toujours 3 sous-régions
             alpha_forehead = get_weighted_reg_alpha('forehead_1', 'forehead_2', 'forehead_3')
-            alpha_left = get_weighted_reg_alpha('left_cheek_1', 'left_cheek_2', 'left_cheek_3')
-            alpha_right = get_weighted_reg_alpha('right_cheek_1', 'right_cheek_2', 'right_cheek_3')
-
-            # Since Lips is a single ROI, its Regional Alpha is exactly its Sub-Alpha!
-            alpha_lips = alphas['lips']
+            
+            # Les joues sont d'un seul bloc, on prend leur Alpha directement
+            alpha_left = alphas['left_cheek']
+            alpha_right = alphas['right_cheek']
             
             # The Global Alpha is simply the sum of every individual Alpha multiplied by its trust percentage.
             global_alpha = sum(weights[k] * alphas[k] for k in self.roi_keys)
@@ -247,8 +246,7 @@ class SignalProcessor:
         self.latest_regional_alphas = {
             'forehead': alpha_forehead,
             'left_cheek': alpha_left,
-            'right_cheek': alpha_right,
-            'lips': alpha_lips
+            'right_cheek': alpha_right
         }
         self.latest_global_alpha = global_alpha
         self.latest_math_weights = weights.copy()
