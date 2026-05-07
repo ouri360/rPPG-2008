@@ -13,7 +13,7 @@ from typing import Optional
 
 
 class FaceDetector:
-    def __init__(self, decimation_rate: int = 3):
+    def __init__(self, decimation_rate: int = 6):
         self.mp_face_mesh = mp.solutions.face_mesh
         self.face_mesh = self.mp_face_mesh.FaceMesh(
             max_num_faces=1,
@@ -59,6 +59,14 @@ class FaceDetector:
         for region_name, hull in self.cached_hulls.items():
             master_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
             cv2.fillPoly(master_mask, [hull], 255)
+
+            # --- ÉROSION DU MASQUE ---
+            # On rogne les bords du masque de 2 pixels vers l'intérieur pour éviter 
+            # la lumière spéculaire sur la courbure du visage.
+            kernel = np.ones((2, 2), np.uint8)
+            master_mask = cv2.erode(master_mask, kernel, iterations=1)
+            # -----------------------------------
+
             x, y, w_box, h_box = cv2.boundingRect(hull)
             if draw: cv2.fillPoly(face_clip_mask, [hull], 255)
 

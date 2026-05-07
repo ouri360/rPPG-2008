@@ -41,7 +41,7 @@ def main():
     
     with WebcamStream(source=VIDEO_SOURCE) as cam:
         frame_counter = 0
-        processor = SignalProcessor(buffer_seconds=15, target_fps=cam.fps)
+        processor = SignalProcessor(buffer_seconds=12, target_fps=cam.fps)
 
         while True:
             success, frame = cam.read_frame()

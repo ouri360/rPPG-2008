@@ -47,6 +47,8 @@ class SignalProcessor:
         self.target_fps = target_fps
         self.buffer_seconds = buffer_seconds
         self.max_length = int(buffer_seconds * target_fps)
+
+        self.last_confident_hz = None
         
         self.raw_r = deque(maxlen=self.max_length)
         self.raw_g = deque(maxlen=self.max_length)
@@ -256,7 +258,15 @@ class SignalProcessor:
             return None
         
         H_detrended = detrend(H_flat) 
-        sos = butter(ORDER, [LOWCUT_HZ, HIGHCUT_HZ], btype='bandpass', fs=self.target_fps, output='sos')
+        # --- FILTRAGE DYNAMIQUE (ADAPTATIVE BANDPASS) ---
+        if self.last_confident_hz is not None:
+            # On crée une fenêtre glissante serrée de ± 0.35 Hz (± 21 BPM) autour du cœur
+            low_bound = max(LOWCUT_HZ, self.last_confident_hz - 0.35)
+            high_bound = min(HIGHCUT_HZ, self.last_confident_hz + 0.35)
+        else:
+            low_bound, high_bound = LOWCUT_HZ, HIGHCUT_HZ
+            
+        sos = butter(ORDER, [low_bound, high_bound], btype='bandpass', fs=self.target_fps, output='sos')
         filtered_signal = sosfiltfilt(sos, H_detrended)
         return filtered_signal
     
@@ -282,6 +292,10 @@ class SignalProcessor:
         bpm_filt_mag = filtered_power[bpm_indices]
         
         raw_bpm = self.hr_tracker.update(bpm_freqs, bpm_filt_mag)
+        # On enregistre la fréquence (Hz) pour le prochain passage du filtre
+        if raw_bpm is not None:
+            self.last_confident_hz = raw_bpm / 60.0
+            
         return raw_bpm, bpm_freqs, bpm_filt_mag
     
     def get_current_fps(self) -> float:
