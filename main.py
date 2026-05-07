@@ -71,20 +71,24 @@ def main():
                     is_calculating = True 
                     
                     try:
-                        # On réceptionne les DEUX voies
-                        sig_math, sig_visuel = processor.get_filtered_signal()
+                        # 1. On récupère la réponse brute
+                        signals = processor.get_filtered_signal()
                         
-                        if sig_math is not None and len(sig_math) > 30:
-                            last_filtered_signal = sig_math
+                        # 2. On vérifie que ce n'est pas "None" (que le buffer de 2s est rempli)
+                        if signals is not None:
+                            sig_math, sig_visuel = signals
                             
-                            # --- L'INTERFACE reçoit le signal nettoyé ---
-                            display_pts = int(cam.fps * 3)
-                            wave_slice = sig_visuel[-display_pts:] # <--- sig_visuel
-                            min_val, max_val = np.min(wave_slice), np.max(wave_slice)
-                            last_ecg_normalized = (wave_slice - min_val) / (max_val - min_val + 1e-8)
-                            
-                            # --- LA FFT reçoit la vérité ---
-                            bpm, freqs, filt_mag = processor.estimate_heart_rate(filtered_signal=sig_math) # <--- sig_math
+                            if len(sig_math) > 30:
+                                last_filtered_signal = sig_math
+                                
+                                # --- L'INTERFACE reçoit le signal nettoyé ---
+                                display_pts = int(cam.fps * 3)
+                                wave_slice = sig_visuel[-display_pts:]
+                                min_val, max_val = np.min(wave_slice), np.max(wave_slice)
+                                last_ecg_normalized = (wave_slice - min_val) / (max_val - min_val + 1e-8)
+                                
+                                # --- LA FFT reçoit la vérité brute ---
+                                bpm, freqs, filt_mag = processor.estimate_heart_rate(filtered_signal=sig_math)
                             
                             if bpm is not None:
                                 last_calculated_bpm = bpm

@@ -41,6 +41,24 @@ class WebcamStream:
         # 2. Hardware Locking
         if self.is_live:
             logging.info("Live camera detected. Locking V4L2 hardware parameters...")
+
+            # --- FORCER LE FORMAT BRUT (ZÉRO DÉCOMPRESSION CPU) ---
+            # Demande à la webcam d'envoyer des pixels bruts (YUYV). 
+            # Si la webcam refuse, OpenCV repassera en MJPEG.
+            # Code fourcc pour YUYV : 'Y', 'U', 'Y', 'V'
+            fourcc = cv2.VideoWriter_fourcc(*'YUYV')
+            self.cap.set(cv2.CAP_PROP_FOURCC, fourcc)
+
+            # --- LOG FORMAT VIDÉO ---
+            fourcc_int = int(self.cap.get(cv2.CAP_PROP_FOURCC))
+            fourcc_str = "".join([chr((fourcc_int >> 8 * i) & 0xFF) for i in range(4)])
+            logging.info(f"Format Vidéo Actif (FOURCC) : {fourcc_str}")
+            
+            # Forcer la résolution (Exemple : 640x480 est parfait pour rPPG, plus grand ralentit MediaPipe)
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            # ----------------------------------------------------------------
+
             self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) 
             self.cap.set(cv2.CAP_PROP_EXPOSURE, 100) 
             self.cap.set(cv2.CAP_PROP_AUTO_WB, 0)
@@ -63,7 +81,7 @@ class WebcamStream:
             # Spawn the background I/O Thread
             self.thread = threading.Thread(target=self._update, daemon=True)
             self.thread.start()
-            logging.info("Background I/O Thread started! Main CPU loop is now unblocked.")
+            logging.info("Background I/O Thread started.")
         else:
             logging.info("Video file detected. Using standard sequential reading for testing.")
 

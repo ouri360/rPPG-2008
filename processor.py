@@ -102,7 +102,7 @@ class SignalProcessor:
         self.latest_global_alpha = 1.0
         self.current_backend = "NumPy (CPU)"
 
-        logging.info(f"SignalProcessor running securely on: {self.current_backend}")
+        logging.info(f"SignalProcessor running on: {self.current_backend}")
 
         self.raw_signal = self.raw_g 
         self.timestamps = deque(maxlen=self.max_length)
