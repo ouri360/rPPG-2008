@@ -29,17 +29,36 @@ class BiologicalHRTracker:
     def update(self, valid_freqs_hz: np.ndarray, valid_power: np.ndarray) -> float:
         if len(valid_freqs_hz) == 0:
             return self.last_bpm if self.last_bpm else 75.0
+        
         if self.last_bpm is None:
             best_idx = np.argmax(valid_power)
             self.last_bpm = valid_freqs_hz[best_idx] * 60.0
             return self.last_bpm
+        
         norm_power = valid_power / (np.max(valid_power) + 1e-8)
         freq_bpm = valid_freqs_hz * 60.0
         distance_penalty = np.abs(freq_bpm - self.last_bpm) / self.max_jump
         scores = norm_power - (distance_penalty * 0.5) 
+
         best_idx = np.argmax(scores)
-        raw_bpm = valid_freqs_hz[best_idx] * 60.0
-        self.last_bpm = (0.7 * self.last_bpm) + (0.3 * raw_bpm)
+
+        # --- INTERPOLATION PARABOLIQUE (Précision Sub-Hz) ---
+        # Si le pic n'est pas sur les bords extérieurs
+        if 0 < best_idx < len(valid_freqs_hz) - 1:
+            alpha = scores[best_idx - 1]
+            beta = scores[best_idx]
+            gamma = scores[best_idx + 1]
+            
+            # Calcul du décalage exact du sommet de la parabole
+            shift = 0.5 * (alpha - gamma) / (alpha - 2 * beta + gamma + 1e-8)
+            exact_freq = valid_freqs_hz[best_idx] + shift * (valid_freqs_hz[1] - valid_freqs_hz[0])
+        else:
+            exact_freq = valid_freqs_hz[best_idx]
+            
+        raw_bpm = exact_freq * 60.0
+
+        # Lissage plus fort (0.85 au lieu de 0.7) adapté au buffer court de 12s
+        self.last_bpm = (0.85 * self.last_bpm) + (0.15 * raw_bpm)
         return self.last_bpm
 
 class SignalProcessor:
@@ -292,8 +311,14 @@ class SignalProcessor:
         bpm_filt_mag = filtered_power[bpm_indices]
         
         raw_bpm = self.hr_tracker.update(bpm_freqs, bpm_filt_mag)
+
+        # On calcule le rapport signal/bruit du pic actuel
+        peak_power = np.max(bpm_filt_mag)
+        mean_power = np.mean(bpm_filt_mag)
+        snr = peak_power / (mean_power + 1e-8)
+
         # On enregistre la fréquence (Hz) pour le prochain passage du filtre
-        if raw_bpm is not None:
+        if raw_bpm is not None and snr > 3.5:
             self.last_confident_hz = raw_bpm / 60.0
             
         return raw_bpm, bpm_freqs, bpm_filt_mag
