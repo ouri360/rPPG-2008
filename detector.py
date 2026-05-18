@@ -87,30 +87,28 @@ class FaceDetector:
             dynamic_rois[roi_name] = cv2.mean(frame, mask=precomputed_mask)[:3]
 
         # 3. Dessin OpenCV 
-        if draw and ai_weights:
-            overlay = np.zeros_like(frame)
-            face_clip_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+        # 3. Dessin OpenCV 
+        if draw:
+            # A. Les couleurs Inferno (Seulement si le prog. est activée avec des poids)
+            if ai_weights:
+                overlay = np.zeros_like(frame)
+                face_clip_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
 
-            for roi_name, precomputed_mask in self.cached_masks.items():
-                # Calcul de la couleur Inferno en fonction du poids mathématique
-                weight = ai_weights.get(roi_name, 0.20)
-                intensity = np.clip(weight * 5.0 * 255, 0, 255).astype(np.uint8)
-                color = tuple(map(int, cv2.applyColorMap(np.array([[intensity]], dtype=np.uint8), cv2.COLORMAP_INFERNO)[0,0]))
+                for roi_name, precomputed_mask in self.cached_masks.items():
+                    weight = ai_weights.get(roi_name, 0.20)
+                    intensity = np.clip(weight * 6.0 * 255, 0, 255).astype(np.uint8)
+                    color = tuple(map(int, cv2.applyColorMap(np.array([[intensity]], dtype=np.uint8), cv2.COLORMAP_INFERNO)[0,0]))
+                    
+                    overlay[precomputed_mask == 255] = color
+                    cv2.bitwise_or(face_clip_mask, precomputed_mask, dst=face_clip_mask)
+
+                frame_bg = cv2.bitwise_and(frame, frame, mask=cv2.bitwise_not(face_clip_mask))
+                face_pixels = cv2.bitwise_and(frame, frame, mask=face_clip_mask)
+                overlay_blended = cv2.addWeighted(face_pixels, 0.2, overlay, 0.8, 0)
                 
-                # On peint la zone exacte du masque avec la couleur
-                overlay[precomputed_mask == 255] = color
-                # On ajoute ce morceau au masque global du visage
-                cv2.bitwise_or(face_clip_mask, precomputed_mask, dst=face_clip_mask)
+                np.copyto(frame, cv2.add(frame_bg, overlay_blended))
 
-            # Fusion transparente avec l'image de la webcam (40% opacité)
-            frame_bg = cv2.bitwise_and(frame, frame, mask=cv2.bitwise_not(face_clip_mask))
-            face_pixels = cv2.bitwise_and(frame, frame, mask=face_clip_mask)
-            overlay_blended = cv2.addWeighted(face_pixels, 0.2, overlay, 0.8, 0)
-            
-            # Application finale sur l'image
-            np.copyto(frame, cv2.add(frame_bg, overlay_blended))
-
-            # Dessin des contours blancs
+            # B. Les contours blancs (Toujours actifs pour vérifier le tracking)
             for hull in self.cached_hulls.values():
                 cv2.polylines(frame, [hull], True, (255, 255, 255), 1)
 
