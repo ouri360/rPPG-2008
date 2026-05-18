@@ -23,9 +23,9 @@ telemetry_data = {
 
 # --- INITIALISATION MATÉRIELLE UNIQUE (Anti-Freeze USB) ---
 # On démarre la caméra, MediaPipe et le processeur UNE SEULE FOIS au lancement du script.
-# La caméra tourne 24h/24 en tâche de fond. Rafraîchir la page ne coupe plus le bus USB !
+# La caméra tourne 24h/24 en tâche de fond.
 detector = FaceDetector(decimation_rate=2)
-processor = SignalProcessor(buffer_seconds=12, target_fps=25.0)
+processor = SignalProcessor(buffer_seconds=15, target_fps=25.0)
 cam = WebcamStream(source=0)
 
 def generate_video_feed():
@@ -114,7 +114,7 @@ def toggle_math():
     
     if not math_active:
         # On vide les buffers et la mémoire si on arrête
-        processor = SignalProcessor(buffer_seconds=12, target_fps=25.0)
+        processor = SignalProcessor(buffer_seconds=15, target_fps=25.0)
         telemetry_data["bpm"] = "--"
         telemetry_data["ecg_wave"] = []
         
