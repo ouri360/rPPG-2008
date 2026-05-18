@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard rPPG - Jetson Orin</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #121212; color: white; display: flex; padding: 20px; }
+        .video-container { flex: 1; margin-right: 20px; }
+        .dashboard { width: 400px; background: #1e1e1e; padding: 20px; border-radius: 10px; }
+        img { width: 100%; border-radius: 8px; border: 2px solid #333; }
+        .stat-box { background: #2d2d2d; padding: 15px; border-radius: 8px; margin-bottom: 15px; text-align: center; }
+        h1 { font-size: 48px; color: #ff4757; margin: 10px 0; }
+        button { width: 100%; padding: 15px; font-size: 18px; font-weight: bold; cursor: pointer; border-radius: 8px; border: none; }
+        .btn-start { background-color: #2ed573; color: white; }
+        .btn-stop { background-color: #ff4757; color: white; }
+        canvas { background: #000; border-radius: 5px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <div class="video-container">
+        <h2>Flux Caméra & ROI</h2>
+        <img src="{{ url_for('video_feed') }}" alt="Webcam Feed">
+    </div>
+
+    <div class="dashboard">
+        <button id="toggleBtn" class="btn-start" onclick="toggleMath()">START rPPG</button>
+        
+        <div class="stat-box" style="margin-top: 20px;">
+            <h3>BPM Estimé</h3>
+            <h1 id="bpmDisplay">--</h1>
+        </div>
+
+        <div class="stat-box">
+            <h3>Onde ECG (POS)</h3>
+            <canvas id="ecgChart" height="150"></canvas>
+        </div>
+
+        <div class="stat-box">
+            <h3>Poids des Zones (SNR)</h3>
+            <p id="weightsDisplay" style="font-family: monospace; font-size: 14px;">En attente...</p>
+        </div>
+    </div>
+
+    <script>
+        let isRunning = false;
+        
+        // Initialisation du Graphique ECG avec Chart.js
+        const ctx = document.getElementById('ecgChart').getContext('2d');
+        const ecgChart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: Array(75).fill(''), datasets: [{ label: 'rPPG', data: [], borderColor: '#2ed573', borderWidth: 2, pointRadius: 0, tension: 0.4 }] },
+            options: { animation: false, scales: { y: { min: 0, max: 1, display: false }, x: { display: false } }, plugins: { legend: { display: false } } }
+        });
+
+        // Fonction pour démarrer/arrêter les maths
+        function toggleMath() {
+            fetch('/toggle_math', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                isRunning = (data.status === "running");
+                const btn = document.getElementById("toggleBtn");
+                btn.innerText = isRunning ? "STOP rPPG" : "START rPPG";
+                btn.className = isRunning ? "btn-stop" : "btn-start";
+                
+                if (!isRunning) {
+                    document.getElementById("bpmDisplay").innerText = "--";
+                    ecgChart.data.datasets[0].data = [];
+                    ecgChart.update();
+                }
+            });
+        }
+
+        // Boucle de mise à jour de la Télémétrie (Tourne 10x par seconde)
+        setInterval(() => {
+            if (isRunning) {
+                fetch('/get_telemetry')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === "stopped") return;
+                    
+                    // Mise à jour du BPM
+                    document.getElementById("bpmDisplay").innerText = data.bpm;
+                    
+                    // Mise à jour de l'ECG
+                    if (data.ecg_wave.length > 0) {
+                        ecgChart.data.datasets[0].data = data.ecg_wave;
+                        ecgChart.update();
+                    }
+                    
+                    // Mise à jour des poids
+                    let weightsHtml = "";
+                    for (const [key, value] of Object.entries(data.weights)) {
+                        weightsHtml += `${key}: ${(value * 100).toFixed(1)}%<br>`;
+                    }
+                    weightsHtml += `<br><strong>Global SNR: ${data.snr}</strong>`;
+                    document.getElementById("weightsDisplay").innerHTML = weightsHtml;
+                });
+            }
+        }, 100); // Polling toutes les 100ms
+    </script>
+</body>
+</html>
